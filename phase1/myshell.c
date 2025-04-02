@@ -9,6 +9,7 @@ int main() {
         memset(cmdline, '\0', MAX_LINE);
         memset(args, 0, MAX_LENGTH * sizeof(char*));
         fflush(stdin);
+        fflush(stdout);
 
         // Shell Prompt: print your prompt
         fputs("CSE4100-SP-P2> ", stdout);
@@ -72,19 +73,21 @@ void myshell_execCommand(char **args) {
     if(pid == 0) {
         if(!strcmp(args[0], "cd")) {
             if(!strcmp(args[1], "\0")) {
-                chdir(getenv("HOME"));
+                status = chdir(getenv("HOME"));
+                exit(EXIT_SUCCESS);
             }
             else if (chdir(args[1]) < 0) {
-                fputs("No such file or directory\n", stdout);
+                exit(EXIT_FAILURE);
             }
             else {
                 chdir(args[1]);
+                exit(EXIT_SUCCESS);
             }
         }
         else {
           // Execute the command
           if(execvp(args[0], args) < 0) {
-            fputs("Command not found\n", stdout);
+            exit(EXIT_SUCCESS);
           }
         }
     }
