@@ -73,21 +73,18 @@ void myshell_execCommand(char **args) {
     if(pid == 0) {
         if(!strcmp(args[0], "cd")) {
             if(!strcmp(args[1], "\0")) {
-                status = chdir(getenv("HOME"));
-                exit(EXIT_SUCCESS);
             }
             else if (chdir(args[1]) < 0) {
-                exit(EXIT_FAILURE);
             }
             else {
                 chdir(args[1]);
-                exit(EXIT_SUCCESS);
             }
         }
         else {
-          // Execute the command
-          if(execvp(args[0], args) < 0) {
-            exit(EXIT_SUCCESS);
+            // Execute the command
+            if(execvp(args[0], args) < 0) {
+                // Print error message
+                fprintf(stderr, "%s: command not found\n", args[0]);
           }
         }
     }
