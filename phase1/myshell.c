@@ -93,4 +93,96 @@ void myshell_execCommand(char **args) {
         // Wait for the child process to terminate
         waitpid(pid, &status, 0);
     }
+
+    // Check for errors
+    if (pid < 0) {
+        fprintf(stderr, "Fork failed\n");
+        exit(EXIT_FAILURE);
+    }
+    if (WIFEXITED(status)) {
+        int exit_status = WEXITSTATUS(status);
+        if (exit_status != 0) {
+            fprintf(stderr, "Command exited with status %d\n", exit_status);
+        }
+    }
+    if (WIFSIGNALED(status)) {
+        int signal_number = WTERMSIG(status);
+        fprintf(stderr, "Command terminated by signal %d\n", signal_number);
+    }
+    if (WIFSTOPPED(status)) {
+        int signal_number = WSTOPSIG(status);
+        fprintf(stderr, "Command stopped by signal %d\n", signal_number);
+    }
+    if (WIFCONTINUED(status)) {
+        fprintf(stderr, "Command continued\n");
+    }
+    if (WIFEXITED(status)) {
+        int exit_status = WEXITSTATUS(status);
+        if (exit_status != 0) {
+            fprintf(stderr, "Command exited with status %d\n", exit_status);
+        }
+    }
+    if (WIFSIGNALED(status)) {
+        int signal_number = WTERMSIG(status);
+        fprintf(stderr, "Command terminated by signal %d\n", signal_number);
+    }
+    if (WIFSTOPPED(status)) {
+        int signal_number = WSTOPSIG(status);
+        fprintf(stderr, "Command stopped by signal %d\n", signal_number);
+    }
+    if (WIFCONTINUED(status)) {
+        fprintf(stderr, "Command continued\n");
+    }
+    if (WIFEXITED(status)) {
+        int exit_status = WEXITSTATUS(status);
+        if (exit_status != 0) {
+            fprintf(stderr, "Command exited with status %d\n", exit_status);
+        }
+    }
+    if (WIFSIGNALED(status)) {
+        int signal_number = WTERMSIG(status);
+        fprintf(stderr, "Command terminated by signal %d\n", signal_number);
+    }
+    if (WIFSTOPPED(status)) {
+        int signal_number = WSTOPSIG(status);
+        fprintf(stderr, "Command stopped by signal %d\n", signal_number);
+    }
+    if (WIFCONTINUED(status)) {
+        fprintf(stderr, "Command continued\n");
+    }
+    if (WIFEXITED(status)) {
+        int exit_status = WEXITSTATUS(status);
+        if (exit_status != 0) {
+            fprintf(stderr, "Command exited with status %d\n", exit_status);
+        }
+    }
+    if (WIFSIGNALED(status)) {
+        int signal_number = WTERMSIG(status);
+        fprintf(stderr, "Command terminated by signal %d\n", signal_number);
+    }
+    if (WIFSTOPPED(status)) {
+        int signal_number = WSTOPSIG(status);
+        fprintf(stderr, "Command stopped by signal %d\n", signal_number);
+    }
+    if (WIFCONTINUED(status)) {
+        fprintf(stderr, "Command continued\n");
+    }
+    if (WIFEXITED(status)) {
+        int exit_status = WEXITSTATUS(status);
+        if (exit_status != 0) {
+            fprintf(stderr, "Command exited with status %d\n", exit_status);
+        }
+    }
+    if (WIFSIGNALED(status)) {
+        int signal_number = WTERMSIG(status);
+        fprintf(stderr, "Command terminated by signal %d\n", signal_number);
+    }
+    if (WIFSTOPPED(status)) {
+        int signal_number = WSTOPSIG(status);
+        fprintf(stderr, "Command stopped by signal %d\n", signal_number);
+    }
+    if (WIFCONTINUED(status)) {
+        fprintf(stderr, "Command continued\n");
+    }
+    exit(0);
 }
