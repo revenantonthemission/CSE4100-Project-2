@@ -23,6 +23,27 @@ int main() {
         // Execute the command
         if(!strcmp(args[0], "exit"))
             exit(EXIT_SUCCESS);
+        else if(!strcmp(args[0], "cd"))
+        {
+            // Change directory
+            if(args[1] == NULL) {
+                // Change to home directory
+                char *home = getenv("HOME");
+                if (home == NULL) {
+                    fprintf(stderr, "cd: HOME not set\n");
+                    continue;
+                }
+                chdir(home);
+            }
+            else {
+                // Change to specified directory
+                if(chdir(args[1]) < 0) {
+                    fprintf(stderr, "cd: %s: No such file or directory\n", args[1]);
+                    continue;
+                }
+            }
+            continue;
+        }
         myshell_execCommand(args);
 
     } while(1);
@@ -71,101 +92,23 @@ void myshell_execCommand(char **args) {
 
     // Child Process
     if(pid == 0) {
-        if(!strcmp(args[0], "cd")) {
-            if(!strcmp(args[1], "\0")) {
-            }
-            else if (chdir(args[1]) < 0) {
-            }
-            else {
-                chdir(args[1]);
-            }
-        }
-        else {
-            // Execute the command
-            if(execvp(args[0], args) < 0) {
-                // Print error message
-                fprintf(stderr, "%s: command not found\n", args[0]);
-          }
+        // Execute the command
+        if (execvp(args[0], args) < 0) {
+            fprintf(stderr, "%s: Command not found\n", args[0]);
+            exit(EXIT_FAILURE);
         }
     }
     // Parent Process
     else {
         // Wait for the child process to terminate
         waitpid(pid, &status, 0);
+        return;
     }
 
     // Check for errors
     if (pid < 0) {
         fprintf(stderr, "Fork failed\n");
         exit(EXIT_FAILURE);
-    }
-    if (WIFEXITED(status)) {
-        int exit_status = WEXITSTATUS(status);
-        if (exit_status != 0) {
-            fprintf(stderr, "Command exited with status %d\n", exit_status);
-        }
-    }
-    if (WIFSIGNALED(status)) {
-        int signal_number = WTERMSIG(status);
-        fprintf(stderr, "Command terminated by signal %d\n", signal_number);
-    }
-    if (WIFSTOPPED(status)) {
-        int signal_number = WSTOPSIG(status);
-        fprintf(stderr, "Command stopped by signal %d\n", signal_number);
-    }
-    if (WIFCONTINUED(status)) {
-        fprintf(stderr, "Command continued\n");
-    }
-    if (WIFEXITED(status)) {
-        int exit_status = WEXITSTATUS(status);
-        if (exit_status != 0) {
-            fprintf(stderr, "Command exited with status %d\n", exit_status);
-        }
-    }
-    if (WIFSIGNALED(status)) {
-        int signal_number = WTERMSIG(status);
-        fprintf(stderr, "Command terminated by signal %d\n", signal_number);
-    }
-    if (WIFSTOPPED(status)) {
-        int signal_number = WSTOPSIG(status);
-        fprintf(stderr, "Command stopped by signal %d\n", signal_number);
-    }
-    if (WIFCONTINUED(status)) {
-        fprintf(stderr, "Command continued\n");
-    }
-    if (WIFEXITED(status)) {
-        int exit_status = WEXITSTATUS(status);
-        if (exit_status != 0) {
-            fprintf(stderr, "Command exited with status %d\n", exit_status);
-        }
-    }
-    if (WIFSIGNALED(status)) {
-        int signal_number = WTERMSIG(status);
-        fprintf(stderr, "Command terminated by signal %d\n", signal_number);
-    }
-    if (WIFSTOPPED(status)) {
-        int signal_number = WSTOPSIG(status);
-        fprintf(stderr, "Command stopped by signal %d\n", signal_number);
-    }
-    if (WIFCONTINUED(status)) {
-        fprintf(stderr, "Command continued\n");
-    }
-    if (WIFEXITED(status)) {
-        int exit_status = WEXITSTATUS(status);
-        if (exit_status != 0) {
-            fprintf(stderr, "Command exited with status %d\n", exit_status);
-        }
-    }
-    if (WIFSIGNALED(status)) {
-        int signal_number = WTERMSIG(status);
-        fprintf(stderr, "Command terminated by signal %d\n", signal_number);
-    }
-    if (WIFSTOPPED(status)) {
-        int signal_number = WSTOPSIG(status);
-        fprintf(stderr, "Command stopped by signal %d\n", signal_number);
-    }
-    if (WIFCONTINUED(status)) {
-        fprintf(stderr, "Command continued\n");
     }
     if (WIFEXITED(status)) {
         int exit_status = WEXITSTATUS(status);
