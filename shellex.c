@@ -47,6 +47,8 @@ void eval(char *cmdline)
 	/* Parent waits for foreground job to terminate */
 	if (!bg){ 
 	    int status;
+        if(waitpid(pid, &status, 0) < 0)
+            unix_error("waitfg: waitpid error");
 	}
 	else//when there is backgrount process!
 	    printf("%d %s", pid, cmdline);
