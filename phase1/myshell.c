@@ -85,17 +85,8 @@ void myshell_parseInput(char *buf, char **args) {
 
 void myshell_execCommand(char **args) {
     // Variables
-    pid_t pid, ppid = getppid();  // 부모 프로세스(쉘)의 PID 얻기
-    char path[MAX_LINE];
+    pid_t pid;  // 부모 프로세스(쉘)의 PID 얻기
     int status;
-    snprintf(path, sizeof(path), "/proc/%d/comm", ppid);
-    printf("%d\n", ppid);
-    FILE *fp = fopen(path, "r");
-
-    if (fp == NULL) {
-        perror("파일을 열 수 없습니다");
-        exit(2);
-    }
 
     // Fork the process
     pid = fork();
@@ -104,7 +95,7 @@ void myshell_execCommand(char **args) {
     if (pid == 0) {
         // Execute the command
         if (execvp(args[0], args) < 0) {
-            fprintf(stderr, "%s: Command not found: %s\n", path, args[0]);
+            fprintf(stderr, "%s: command not found\n", args[0]);
             exit(EXIT_FAILURE);
         }
     }
