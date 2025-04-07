@@ -24,13 +24,14 @@ int main() {
         if (args[0] == NULL) {
             continue;
         }
-
+        
         // Execute the command
-        if (!strcmp(args[0], "exit")) {
+        if(!strcmp(args[0], "exit"))
             exit(EXIT_SUCCESS);
-        } else if (!strcmp(args[0], "cd")) {
+        else if(!strcmp(args[0], "cd"))
+        {
             // Change directory
-            if (args[1] == NULL) {
+            if(args[1] == NULL) {
                 // Change to home directory
                 char *home = getenv("HOME");
                 if (home == NULL) {
@@ -38,9 +39,10 @@ int main() {
                     continue;
                 }
                 chdir(home);
-            } else {
+            }
+            else {
                 // Change to specified directory
-                if (chdir(args[1]) < 0) {
+                if(chdir(args[1]) < 0) {
                     fprintf(stderr, "cd: %s: No such file or directory\n", args[1]);
                     continue;
                 }
@@ -49,12 +51,12 @@ int main() {
         }
         myshell_execCommand(args);
 
-    } while (1);
+    } while(1);
 
     return 0;
 }
 
-/* This function reads input from the command line */
+/* This function reads input from the command line*/
 void myshell_readInput(char *buf) {
     fgets(buf, MAX_LINE, stdin);
 }
@@ -67,16 +69,24 @@ void myshell_parseInput(char *buf, char **args) {
     // Copy the buffer
     strcpy(buffer, buf);
 
+    // Remove the newline character
+    buffer[strcspn(buffer, "\n")] = '\0';
+    // Check for empty input
+    if (strlen(start) == 0) {
+        return;
+    }
+
     // Tokenize the buffer
-    buffer[strlen(buffer) - 1] = ' ';
+    buffer[strlen(buffer)-1] = ' ';
     token[0] = strtok(buffer, " ");
     int i = 0;
-    while (token[i] != NULL) {
+    while(token[i] != NULL) {
         i++;
         token[i] = strtok(NULL, " ");
     }
+
     // Copy the tokens to args
-    for (int j = 0; j < i; j++) {
+    for(int j = 0; j < i; j++) {
         args[j] = token[j];
         args[j][strlen(args[j])] = '\0';
     }
@@ -84,27 +94,19 @@ void myshell_parseInput(char *buf, char **args) {
 }
 
 void myshell_execCommand(char **args) {
-    // Variables
-    pid_t pid, ppid = getppid();  // 부모 프로세스(쉘)의 PID 얻기
-    char path[MAX_LINE];
-    int status;
-    snprintf(path, sizeof(path), "/proc/%d/comm", ppid);
-    printf("%d\n", ppid);
-    FILE *fp = fopen(path, "r");
 
-    if (fp == NULL) {
-        perror("파일을 열 수 없습니다");
-        exit(2);
-    }
+    // Variables
+    pid_t pid;
+    int status;
 
     // Fork the process
     pid = fork();
 
     // Child Process
-    if (pid == 0) {
+    if(pid == 0) {
         // Execute the command
         if (execvp(args[0], args) < 0) {
-            fprintf(stderr, "%s: Command not found: %s\n", path, args[0]);
+            fprintf(stderr, "%s: Command not found\n", args[0]);
             exit(EXIT_FAILURE);
         }
     }
@@ -115,5 +117,27 @@ void myshell_execCommand(char **args) {
         return;
     }
 
+    // Check for errors
+    if (pid < 0) {
+        fprintf(stderr, "Fork failed\n");
+        exit(EXIT_FAILURE);
+    }
+    if (WIFEXITED(status)) {
+        int exit_status = WEXITSTATUS(status);
+        if (exit_status != 0) {
+            fprintf(stderr, "Command exited with status %d\n", exit_status);
+        }
+    }
+    if (WIFSIGNALED(status)) {
+        int signal_number = WTERMSIG(status);
+        fprintf(stderr, "Command terminated by signal %d\n", signal_number);
+    }
+    if (WIFSTOPPED(status)) {
+        int signal_number = WSTOPSIG(status);
+        fprintf(stderr, "Command stopped by signal %d\n", signal_number);
+    }
+    if (WIFCONTINUED(status)) {
+        fprintf(stderr, "Command continued\n");
+    }
     exit(0);
 }
