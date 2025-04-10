@@ -146,6 +146,7 @@ void myshell_execCommand(char **commands) {
             }
 
             // 명령어 실행
+            myshell_handleRedirection(tokens);  // 리다이렉션 처리
             execvp(tokens[0], tokens);
             perror(tokens[0]);
             exit(EXIT_FAILURE);
@@ -176,7 +177,7 @@ void myshell_execCommand(char **commands) {
 }
 
 // 리다이렉션 처리 함수
-void handleRedirection(char **tokens) {
+void myshell_handleRedirection(char **tokens) {
     int i = 0;
     int fd;
 

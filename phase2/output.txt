@@ -1,0 +1,11 @@
+total 128
+drwxr-xr-x@ 10 revenantonthemission  staff    320  4 10 21:39 .
+drwxr-xr-x@ 14 revenantonthemission  staff    448  4 10 21:39 ..
+-rw-r--r--@  1 revenantonthemission  staff   6148  4 10 13:53 .DS_Store
+-rw-r--r--@  1 revenantonthemission  staff    120  4  7 18:39 Makefile
+-rwxr-xr-x@  1 revenantonthemission  staff  35048  4 10 21:39 myshell
+-rw-r--r--@  1 revenantonthemission  staff   5977  4 10 21:39 myshell.c
+drwxr-xr-x@  3 revenantonthemission  staff     96  4 10 00:49 myshell.dSYM
+-rw-r--r--@  1 revenantonthemission  staff    701  4 10 21:38 myshell.h
+-rw-r--r--@  1 revenantonthemission  staff      0  4 10 21:39 output.txt
+-rw-r--r--@  1 revenantonthemission  staff   3286  4 10 21:34 README.md
