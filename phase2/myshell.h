@@ -30,4 +30,5 @@
 void myshell_readInput(char *);
 void myshell_parseInput(char *, char **, const char *);
 void myshell_execCommand(char **);
+int myshell_isBuiltinCommand(char *);
 #endif
