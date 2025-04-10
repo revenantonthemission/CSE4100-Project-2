@@ -25,10 +25,13 @@
 #define MAX_LENGTH 32
 #define MAX_LENGTH_2 1024
 #define MAX_LENGTH_3 32768
-
 // Functions
 void myshell_readInput(char *);
 void myshell_parseInput(char *, char **, const char *);
 void myshell_execCommand(char **);
 void myshell_handleRedirection(char **);
+void myshell_SIGINT(int);
+void myshell_SIGCHLD(int);
+void myshell_addJob();
+void myshell_deleteJob();
 #endif
