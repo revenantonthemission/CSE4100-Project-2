@@ -19,19 +19,15 @@
 #include <sys/mman.h>
 #include <errno.h>
 #include <math.h>
-#include <pthread.h>
-#include <semaphore.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
+#include <assert.h>
 
 // Constants & Macros
-#define MAX_LINE 8192
-#define MAX_LENGTH 128
+#define MAX_LENGTH 32
+#define MAX_LENGTH_2 1024
+#define MAX_LENGTH_3 32768
 
 // Functions
 void myshell_readInput(char *);
-void myshell_parseInput(char *, char **);
+void myshell_parseInput(char *, char **, const char *);
 void myshell_execCommand(char **);
 #endif

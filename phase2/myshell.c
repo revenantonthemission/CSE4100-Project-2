@@ -2,12 +2,16 @@
 
 int main() {
     // Variables
-    char cmdline[MAX_LINE], *args[MAX_LENGTH];
+    char cmdline[MAX_LENGTH_3], *commands[MAX_LENGTH], *tokens[MAX_LENGTH];
+    int i;
 
     do {
         // Initialize
-        memset(cmdline, '\0', MAX_LINE);
-        memset(args, 0, MAX_LENGTH * sizeof(char*));
+        memset(cmdline, '\0', MAX_LENGTH_3);
+        memset(commands, 0, MAX_LENGTH);
+        memset(tokens, 0, MAX_LENGTH);
+
+        // Clear the buffers
         fflush(stdin);
         fflush(stdout);
 
@@ -18,13 +22,21 @@ int main() {
         myshell_readInput(cmdline);
 
         // Parsing: Parse the command
-        myshell_parseInput(cmdline, args);
+        cmdline[strlen(cmdline)-1] = ' ';
+        myshell_parseInput(cmdline, commands, "|");
 
         // Check for empty input
-        if (args[0] == NULL) {
+        if (commands[0] == NULL) {
             continue;
         }
-        myshell_execCommand(args);
+
+        // Execute the command
+        for(i = 0; i<MAX_LENGTH && commands[i]!=NULL; i++) {
+            // Initialize
+            memset(tokens, 0, MAX_LENGTH);
+            myshell_parseInput(commands[i], tokens, " ");
+            myshell_execCommand(tokens);
+        }
 
     } while (1);
 
@@ -33,31 +45,21 @@ int main() {
 
 /* This function reads input from the command line */
 void myshell_readInput(char *buf) {
-    fgets(buf, MAX_LINE, stdin);
+    fgets(buf, MAX_LENGTH_3, stdin);
 }
 
-void myshell_parseInput(char *buf, char **args) {
+void myshell_parseInput(char *buf, char **args, const char *delim) {
     // Variables
-    char buffer[MAX_LINE];
-    char *token[MAX_LENGTH];
-
-    // Copy the buffer
-    strcpy(buffer, buf);
-
-    // Tokenize the buffer
-    buffer[strlen(buffer) - 1] = ' ';
-    token[0] = strtok(buffer, " ");
     int i = 0;
-    while (token[i] != NULL) {
-        i++;
-        token[i] = strtok(NULL, " ");
+    char* token = strtok(buf, delim);
+    while (token != NULL) {
+        // Store the token in the args array
+        if (args != NULL) {
+            args[i++] = token;
+        }
+        // Get the next token
+        token = strtok(NULL, delim);
     }
-    // Copy the tokens to args
-    for (int j = 0; j < i; j++) {
-        args[j] = token[j];
-        args[j][strlen(args[j])] = '\0';
-    }
-    args[i] = NULL;
 }
 
 void myshell_execCommand(char **args) {
