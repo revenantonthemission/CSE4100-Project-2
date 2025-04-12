@@ -129,7 +129,7 @@ void myshell_execCommand(char **commands) {
                 char *home = getenv("HOME");
                 if (home == NULL) {
                     perror("cd");
-                    kill(getpid(), SIGCONT);
+                    //kill(getpid(), SIGCONT);
                     continue;
                 }
                 chdir(home);
@@ -137,12 +137,12 @@ void myshell_execCommand(char **commands) {
                 // 지정된 디렉토리로 변경
                 if (chdir(tokens[1]) < 0) {
                     perror("cd");
-                    kill(getpid(), SIGCONT);
+                    //kill(getpid(), SIGCONT);
                     continue;
                 }
             }
             i++;
-            kill(getpid(), SIGCONT);
+            //kill(getpid(), SIGCONT);
             continue;
         }
 
