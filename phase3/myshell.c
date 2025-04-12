@@ -1,18 +1,12 @@
 #include "myshell.h"
 
 int main() {
-    // Variables
+    // 변수 선언
     char cmdline[MAX_LENGTH_3], *commands[MAX_LENGTH];
     int i;
     sigset_t mask, prev;
-
-    // Initialize signal set
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGINT);
-    sigaddset(&mask, SIGCHLD);
-    sigprocmask(SIG_BLOCK, &mask, &prev);
-
-    // Signal handling
+    
+    // 시그널 처리
     if (signal(SIGINT, myshell_SIGINT) == SIG_ERR) {
         perror("signal");
         _exit(EXIT_FAILURE);
@@ -21,49 +15,46 @@ int main() {
         perror("signal");
         _exit(EXIT_FAILURE);
     }
-    
-    sigprocmask(SIG_SETMASK, &prev, NULL);
 
     do {
-        // Initialize
+        // 초기화
         memset(cmdline, '\0', MAX_LENGTH_3);
         memset(commands, 0, MAX_LENGTH);
-
-        // Shell Prompt: print your prompt
-        write(STDOUT_FILENO, "CSE4100-SP-P3> ", 15);
-        fflush(stdout);
-
-        // Reading: Read the command from standard input
+        
+        // 명령어 읽기
         myshell_readInput(cmdline);
 
-        // Parsing: Parse the command
+        // 명령어 파싱
         cmdline[strlen(cmdline) - 1] = ' ';
         myshell_parseInput(cmdline, commands, "|");
 
-        // Execute the command
+        // 명령어 실행
         myshell_execCommand(commands);
-
-        // Clear the buffers
+    
+        // 시그널 마스크 설정
+        // 버퍼 비우기
         fflush(stdin);
         fflush(stdout);
+        
+        sleep(1);
 
     } while (1);
 
     return 0;
 }
 
-/* This function reads input from the command line */
+/* 명령어 입력을 읽는 함수 */
 void myshell_readInput(char *buf) {
-    // fgets(buf, MAX_LENGTH_3, stdin);
+    write(STDOUT_FILENO, prompt, strlen(prompt));
     read(STDIN_FILENO, buf, MAX_LENGTH_3);
 }
 
 void myshell_parseInput(char *buf, char **args, const char *delim) {
-    // Variables
+    // 변수 선언
     int i = 0;
     char *token;
 
-    // Remove leading and trailing whitespace
+    // 앞뒤 공백 제거
     while (isspace((unsigned char)*buf)) {
         buf++;
     }
@@ -71,10 +62,10 @@ void myshell_parseInput(char *buf, char **args, const char *delim) {
         buf[strlen(buf) - 1] = '\0';
     }
 
-    // Tokenize the input string
+    // 입력 문자열을 토큰화
     token = strtok(buf, delim);
     while (token != NULL) {
-        // Remove leading and trailing whitespace
+        // 앞뒤 공백 제거
         while (isspace((unsigned char)*token)) {
             token++;
         }
@@ -82,13 +73,13 @@ void myshell_parseInput(char *buf, char **args, const char *delim) {
             token[strlen(token) - 1] = '\0';
         }
 
-        // Store the token in the args array
+        // 토큰을 args 배열에 저장
         args[i++] = token;
 
-        // Get the next token
+        // 다음 토큰 가져오기
         token = strtok(NULL, delim);
     }
-    args[i] = NULL;  // Null-terminate the args array
+    args[i] = NULL;  // args 배열을 널로 종료
 }
 
 void myshell_execCommand(char **commands) {
@@ -111,36 +102,47 @@ void myshell_execCommand(char **commands) {
         myshell_parseInput(commands[i], tokens, " ");
         background = 0;
         last_token = 0;
+
         // 마지막 토큰이 '&'이면 백그라운드 실행
         while (tokens[last_token] != NULL) {
             last_token++;
         }
-        if (last_token > 0 && tokens[last_token - 1][strlen(tokens[last_token - 1]) - 1] == '&') {
+
+        // '&'가 명령어와 붙어 있는 경우 처리 ex. "ls -l&"
+        if (last_token > 0 && !strcmp(tokens[last_token - 1], "&")) {
             background = 1;
             tokens[last_token - 1] = NULL;  // '&' 제거
+        } else if(last_token > 0) {
+            if(strlen(tokens[last_token-1]) && tokens[last_token-1][strlen(tokens[last_token-1])-1] == '&') {
+                background = 1;
+                tokens[last_token - 1][strlen(tokens[last_token-1]) - 1] = '\0';  // '&' 제거
+            }
         }
 
         // 빌트인 명령어 처리
         if (!strcmp(tokens[0], "exit")) {
             _exit(EXIT_SUCCESS);
         } else if (!strcmp(tokens[0], "cd")) {
-            // Change directory
+            // 디렉토리 변경
             if (tokens[1] == NULL) {
-                // Change to home directory
+                // 홈 디렉토리로 변경
                 char *home = getenv("HOME");
                 if (home == NULL) {
                     perror("cd");
+                    kill(getpid(), SIGCONT);
                     continue;
                 }
                 chdir(home);
             } else {
-                // Change to specified directory
+                // 지정된 디렉토리로 변경
                 if (chdir(tokens[1]) < 0) {
                     perror("cd");
+                    kill(getpid(), SIGCONT);
                     continue;
                 }
             }
             i++;
+            kill(getpid(), SIGCONT);
             continue;
         }
 
@@ -153,7 +155,7 @@ void myshell_execCommand(char **commands) {
         }
 
         // 자식 프로세스 생성
-        pid = fork();
+        pid = fork(); 
         if (pid < 0) {
             perror("fork");
             _exit(EXIT_FAILURE);
@@ -175,6 +177,16 @@ void myshell_execCommand(char **commands) {
                 close(curr_pipe[1]);
             }
 
+            if (background) {
+                int fd = open("/dev/null", O_RDWR);
+                if (fd < 0) {
+                    perror("open");
+                    _exit(EXIT_FAILURE);
+                }
+                dup2(fd, STDIN_FILENO);  // 표준 입력 리다이렉션
+                close(fd);
+            }
+
             // 명령어 실행
             myshell_handleRedirection(tokens);  // 리다이렉션 처리
             execvp(tokens[0], tokens);
@@ -189,28 +201,32 @@ void myshell_execCommand(char **commands) {
                 close(prev_pipe[0]);
                 close(prev_pipe[1]);
             }
-
             // 현재 파이프를 이전 파이프로 설정
             if (commands[i + 1] != NULL) {
                 prev_pipe[0] = curr_pipe[0];
                 prev_pipe[1] = curr_pipe[1];
-            } else if (background) {
-                // 마지막 명령어가 백그라운드 실행이면 자식 프로세스 기다리지 않음
+            }
+            // 백그라운드 프로세스인 경우 작업 목록에 추가
+           if (background) {
+                // 작업 목록에 추가 (myshell_addJob 함수 구현 필요)
+                //myshell_addJob(pid, commands[i]);
                 write(STDOUT_FILENO, "Background process started > PID: ", 34);
                 sprintf(pid_str, "%d\n", pid);
                 write(STDOUT_FILENO, pid_str, strlen(pid_str));
                 fflush(stdout);
-            } else {
+           }
+           else if (commands[i + 1] == NULL) {
                 // 마지막 명령어면 자식 프로세스 기다림
                 waitpid(pid, &status, 0);
+                write(STDOUT_FILENO, "Foreground process terminated > PID: ", 37);
+                sprintf(pid_str, "%d\n", pid);
+                write(STDOUT_FILENO, pid_str, strlen(pid_str));
+                fflush(stdout);
             }
         }
 
         i++;
     }
-
-    // 모든 자식 프로세스가 종료될 때까지 기다림
-    while (wait(NULL) > 0);
 }
 
 // 리다이렉션 처리 함수
@@ -256,73 +272,54 @@ void myshell_SIGINT(int signal) {
     // SIGINT 처리
     if (signal == SIGINT) {
         write(STDOUT_FILENO, "\nSIGINT received. Exiting...\n", 30);
-        fflush(stdout);
-        // 자식 프로세스 종료
-        pid = getpid();
-        if (kill(pid, SIGKILL) < 0) {
-            perror("kill");
-            _exit(EXIT_FAILURE);
+        // 모든 자식 프로세스 종료
+        for (int i = 0; i < MAXJOBS; i++) {
+            if (jobs[i].state != UNDEF) {
+                pid = jobs[i].pid;
+                kill(pid, SIGKILL);
+                jobs[i].state = UNDEF;  // 작업 상태 초기화
+            }
         }
-        // 부모 프로세스 종료
-        _exit(0);
+        _exit(1);
     }
 }
 
+// SIGCHLD 처리 함수. 자식 프로세스가 종료되어나 중지되었을 때 호출됨
 void myshell_SIGCHLD(int signal) {
     int status, olderr;
     sigset_t mask, prev;
-    pid_t pid;
-    char pid_str[10];
-
-    // Initialize signal set
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGINT);
-    sigaddset(&mask, SIGCHLD);
-    sigprocmask(SIG_BLOCK, &mask, &prev);
-
+    pid_t pid, ppid;
+    char message[MAX_LENGTH_2];
+    
     // SIGCHLD 처리
     if (signal == SIGCHLD) {
         while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
             if (WIFEXITED(status)) {
-                write(STDOUT_FILENO, "[", 1);
-                sprintf(pid_str, "%d", pid);
-                write(STDOUT_FILENO, pid_str, strlen(pid_str));
-                write(STDOUT_FILENO, "]  child process terminated\n", 28);
-                fflush(stdout);
+                // 자식 프로세스가 정상 종료된 경우
+                sprintf(message, "Child process %d terminated with status %d\n", pid, WEXITSTATUS(status));
+                write(STDOUT_FILENO, message, strlen(message));
             } else if (WIFSIGNALED(status)) {
-                write(STDOUT_FILENO, "[", 1);
-                sprintf(pid_str, "%d", pid);
-                write(STDOUT_FILENO, pid_str, strlen(pid_str));
-                write(STDOUT_FILENO, "]  child process killed by signal\n", 34);
-                fflush(stdout);
+                // 자식 프로세스가 시그널에 의해 종료된 경우
+                sprintf(message, "Child process %d killed by signal %d\n", pid, WTERMSIG(status));
+                write(STDOUT_FILENO, message, strlen(message));
             } else if (WIFSTOPPED(status)) {
-                write(STDOUT_FILENO, "[", 1);
-                sprintf(pid_str, "%d", pid);
-                write(STDOUT_FILENO, pid_str, strlen(pid_str));
-                write(STDOUT_FILENO, "]  child process stopped\n", 25);
-                fflush(stdout);
-            } else if (WIFCONTINUED(status)) {
-                write(STDOUT_FILENO, "[", 1);
-                sprintf(pid_str, "%d", pid);
-                write(STDOUT_FILENO, pid_str, strlen(pid_str));
-                write(STDOUT_FILENO, "]  child process continued\n", 27);
-                fflush(stdout);
+                // 자식 프로세스가 중지된 경우
+                sprintf(message, "Child process %d stopped by signal %d\n", pid, WSTOPSIG(status));
+                write(STDOUT_FILENO, message, strlen(message));
             }
         }
     }
 
-    // Restore previous signal mask
-    sigprocmask(SIG_SETMASK, &prev, NULL);
     errno = olderr;
     return;
 }
 void myshell_addJob() {
-    // Add job to the job list
-    // This function is not implemented in this code snippet
-    // You can implement it based on your requirements
+    // 작업 목록에 작업 추가
+    // 이 함수는 이 코드 스니펫에서 구현되지 않았습니다.
+    // 필요에 따라 구현할 수 있습니다.
 }
 void myshell_deleteJob() {
-    // Delete job from the job list
-    // This function is not implemented in this code snippet
-    // You can implement it based on your requirements
+    // 작업 목록에서 작업 삭제
+    // 이 함수는 이 코드 스니펫에서 구현되지 않았습니다.
+    // 필요에 따라 구현할 수 있습니다.
 }

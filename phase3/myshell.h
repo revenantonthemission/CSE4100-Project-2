@@ -25,6 +25,41 @@
 #define MAX_LENGTH 32
 #define MAX_LENGTH_2 1024
 #define MAX_LENGTH_3 32768
+
+// code/ecf/shell.c에서 일단 그대로 가져와 봄.
+
+#define MAXARGS   128
+#define MAXJOBS    16
+
+/* Job states */
+#define UNDEF 0 /* undefined */
+#define FG 1    /* running in foreground */
+#define BG 2    /* running in background */
+#define ST 3    /* stopped */
+
+/* 
+ * Job state transitions and enabling actions:
+ *     FG -> ST  : ctrl-z
+ *     ST -> FG  : "fg pid"
+ *     ST -> BG  : "bg pid"
+ *     BG -> FG  : "fg pid"
+ * At most 1 job can be in the FG state.
+ */
+
+/* begin global variables */
+char prompt[] = "CSE4100-SP-P3> ";       /* command line prompt */
+int verbose = 0;            /* if true, print extra output */
+char sbuf[MAX_LENGTH_2];         /* for composing sprintf messages */
+
+struct job_t {
+    pid_t pid;              /* job PID */
+    int state;              /* UNDEF, BG, FG, or ST */
+    char cmdline[MAX_LENGTH_2];  /* command line */
+};
+struct job_t jobs[MAXJOBS]; /* job list */
+
+
+
 // Functions
 void myshell_readInput(char *);
 void myshell_parseInput(char *, char **, const char *);
@@ -34,4 +69,5 @@ void myshell_SIGINT(int);
 void myshell_SIGCHLD(int);
 void myshell_addJob();
 void myshell_deleteJob();
+
 #endif
