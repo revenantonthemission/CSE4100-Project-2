@@ -193,7 +193,7 @@ void myshell_execCommand(char **commands) {
         if (commands[i+1] != NULL) {
             if (pipe(curr_pipe) < 0) {
                 perror("pipe");
-                exit(EXIT_FAILURE);
+                _exit(EXIT_FAILURE);
             }
         }
 
@@ -230,7 +230,7 @@ void myshell_execCommand(char **commands) {
             myshell_handleRedirection(tokens);  // 리다이렉션 처리
             execvp(tokens[0], tokens);
             perror(tokens[0]);
-            exit(EXIT_FAILURE);
+            _exit(EXIT_FAILURE);
         }
         // 부모 프로세스
         else {
@@ -252,7 +252,7 @@ void myshell_execCommand(char **commands) {
             } else { 
                 // 마지막 명령어면 자식 프로세스 기다림
                 if (!background) {
-                    waitpid(pid, &status, 0);
+                    myshell_waitForJob(pid);
                 } else {
                     // 백그라운드 프로세스인 경우, PID 출력
                     write(STDOUT_FILENO, "\n", 1);
@@ -261,8 +261,8 @@ void myshell_execCommand(char **commands) {
                     write(STDOUT_FILENO, pid_str, strlen(pid_str));
                 }
                 // jobs 배열에서 작업 삭제
-                myshell_deleteJob(pid);
                 prompt_ready = 1;
+                return;
             }
         }
         i++;
@@ -318,7 +318,6 @@ void myshell_SIGINT(int signal) {
                 jobs[i].state = UNDEF;  // 작업 상태 초기화
             }
         }
-        _exit(1);
     }
 }
 
@@ -328,44 +327,40 @@ void myshell_SIGCHLD(int signal) {
     pid_t pid;
     int status;
 
-    // SIGCHLD 처리
-    if (signal == SIGCHLD) {
-        // 자식 프로세스가 종료되었을 때
-        while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
-            // 해당 프로세스가 백그라운드 작업인 경우
-            if (WIFEXITED(status) && myshell_getJobState(pid) == BG) {
-                write(STDOUT_FILENO, "\nBackground process terminated > PID: ", 37);
-                char pid_str[10];
-                sprintf(pid_str, "%d\n", pid);
-                write(STDOUT_FILENO, pid_str, strlen(pid_str));
-            }
-            // 해당 프로세스가 포그라운드 작업인 경우
-            else if (WIFEXITED(status) && myshell_getJobState(pid) == FG) {
-                write(STDOUT_FILENO, "\nForeground process terminated > PID: ", 37);
-                char pid_str[10];
-                sprintf(pid_str, "%d\n", pid);
-                write(STDOUT_FILENO, pid_str, strlen(pid_str));
-            }
-            // 해당 프로세스가 중지된 경우
-            else if (WIFSTOPPED(status)) {
-                write(STDOUT_FILENO, "\nForeground process stopped > PID: ", 36);
-                char pid_str[10];
-                sprintf(pid_str, "%d\n", pid);
-                write(STDOUT_FILENO, pid_str, strlen(pid_str));
-                myshell_setJobState(pid, ST);  // 작업 상태 변경
-            }
-            // 해당 프로세스가 종료된 경우
-            else if (WIFSIGNALED(status)) {
-                write(STDOUT_FILENO, "\nForeground process killed > PID: ", 35);
-                char pid_str[10];
-                sprintf(pid_str, "%d\n", pid);
-                write(STDOUT_FILENO, pid_str, strlen(pid_str));
-                myshell_deleteJob(pid);  // 작업 삭제
-            }
+    // 자식 프로세스가 종료되었을 때
+    while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
+        // 해당 프로세스가 백그라운드 작업인 경우
+        if (WIFEXITED(status) && myshell_getJobState(pid) == BG) {
+            write(STDOUT_FILENO, "\nBackground process terminated > PID: ", 37);
+            char pid_str[10];
+            sprintf(pid_str, "%d\n", pid);
+            write(STDOUT_FILENO, pid_str, strlen(pid_str));
+            myshell_deleteJob(pid);  // 작업 삭제
+        }
+        // 포그라운드 프로세스가 중지된 경우
+        else if (WIFSTOPPED(status)) {
+            write(STDOUT_FILENO, "\nForeground process stopped > PID: ", 36);
+            char pid_str[10];
+            sprintf(pid_str, "%d\n", pid);
+            write(STDOUT_FILENO, pid_str, strlen(pid_str));
+            myshell_setJobState(pid, ST);  // 작업 상태 변경
+        }
+        // 포그라운드 프로세스가 비정상적으로 종료된 경우
+        else if (WIFSIGNALED(status)) {
+            write(STDOUT_FILENO, "\nForeground process killed > PID: ", 37);
+            char pid_str[10];
+            sprintf(pid_str, "%d\n", pid);
+            write(STDOUT_FILENO, pid_str, strlen(pid_str));
+            // 종료 이유 출력
+            write(STDOUT_FILENO, "Killed by\n", 10);
+            sprintf(pid_str, "%d\n", WTERMSIG(status));
+            write(STDOUT_FILENO, pid_str, strlen(pid_str));
+            myshell_deleteJob(pid);  // 작업 삭제
         }
     }
-    errno = olderr;
     prompt_ready = 1;  // 프롬프트 출력 준비 완료
+    errno = olderr;
+    return;
 }
 void myshell_SIGTSTP(int signal) {
     int olderr = errno;
@@ -432,13 +427,30 @@ void myshell_waitForJob(pid_t pid) {
     waitpid(pid, &status, 0);
 }
 void myshell_killJob(pid_t pid) {
+    myshell_deleteJob(pid);
+    write(STDOUT_FILENO, "\nProcess killed > PID: ", 23);
+    char pid_str[10];
+    sprintf(pid_str, "%d\n", pid);
+    write(STDOUT_FILENO, pid_str, strlen(pid_str));
+    prompt_ready = 1;
     kill(pid, SIGKILL);
 }
 void myshell_fgJob(pid_t pid) {
+    myshell_setJobState(pid, FG);
+    write(STDOUT_FILENO, "\nForeground process resumed > PID: ", 36);
+    char pid_str[10];
+    sprintf(pid_str, "%d\n", pid);
+    write(STDOUT_FILENO, pid_str, strlen(pid_str));
+    prompt_ready = 1;
     kill(pid, SIGCONT);
-    waitpid(pid, NULL, 0);
 }
 void myshell_bgJob(pid_t pid) {
+    myshell_setJobState(pid, BG);
+    write(STDOUT_FILENO, "\nBackground process resumed > PID: ", 35);
+    char pid_str[10];
+    sprintf(pid_str, "%d\n", pid);
+    write(STDOUT_FILENO, pid_str, strlen(pid_str));
+    prompt_ready = 1;
     kill(pid, SIGCONT);
 }
 void myshell_setJobState(pid_t pid, int state) {
