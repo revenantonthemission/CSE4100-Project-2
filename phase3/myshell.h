@@ -69,6 +69,7 @@ void myshell_handleRedirection(char **);
 void myshell_SIGINT(int);
 void myshell_SIGCHLD(int);
 void myshell_SIGTSTP(int);
+void myshell_initJobs(void);
 void myshell_addJob(pid_t, int, const char*);
 void myshell_deleteJob(pid_t);
 void myshell_listJobs(void);
@@ -77,5 +78,5 @@ void myshell_killJob(pid_t);
 void myshell_fgJob(pid_t);
 void myshell_bgJob(pid_t);
 void myshell_setJobState(pid_t, int);
-
+int myshell_getJobState(pid_t);
 #endif
