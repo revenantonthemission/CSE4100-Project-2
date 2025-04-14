@@ -1,5 +1,15 @@
 {
   "files.associations": {
-    "errno.h": "c"
+    "errno.h": "c",
+    "mman.h": "c",
+    "string.h": "c",
+    "wait.h": "c",
+    "time.h": "c",
+    "setjmp.h": "c",
+    "assert.h": "c",
+    "stat.h": "c",
+    "stdarg.h": "c",
+    "stdio.h": "c",
+    "stdlib.h": "c"
   }
 }
