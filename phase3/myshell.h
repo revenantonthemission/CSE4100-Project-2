@@ -47,9 +47,10 @@
  */
 
 /* begin global variables */
-char prompt[] = "CSE4100-SP-P3> ";       /* command line prompt */
+char prompt[] = "CSE4100-SP-P2> ";       /* command line prompt */
 int verbose = 0;            /* if true, print extra output */
-char sbuf[MAX_LENGTH_2];         /* for composing sprintf messages */
+char message[MAX_LENGTH_2];         /* for composing sprintf messages */
+volatile sig_atomic_t prompt_ready = 1;
 
 struct job_t {
     pid_t pid;              /* job PID */
@@ -67,7 +68,16 @@ void myshell_execCommand(char **);
 void myshell_handleRedirection(char **);
 void myshell_SIGINT(int);
 void myshell_SIGCHLD(int);
-void myshell_addJob();
-void myshell_deleteJob();
+void myshell_SIGTSTP(int);
+void myshell_initJobs(void);
+void myshell_addJob(pid_t, int, const char*);
+void myshell_deleteJob(pid_t);
+void myshell_listJobs(void);
+void myshell_waitForJob(pid_t);
+void myshell_killJob(pid_t);
+void myshell_fgJob(pid_t);
+void myshell_bgJob(pid_t);
+void myshell_setJobState(pid_t, int);
+int myshell_getJobState(pid_t);
 
 #endif
