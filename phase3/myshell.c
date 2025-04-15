@@ -5,19 +5,9 @@ int main() {
     char cmdline[MAX_LENGTH_3], *commands[MAX_LENGTH];
     int i;
 
-    // 시그널 처리
-    if (signal(SIGINT, myshell_SIGINT) == SIG_ERR) {
-        perror("signal");
-        _exit(EXIT_FAILURE);
-    }
-    if (signal(SIGCHLD, myshell_SIGCHLD) == SIG_ERR) {
-        perror("signal");
-        _exit(EXIT_FAILURE);
-    }
-    if (signal(SIGTSTP, myshell_SIGTSTP) == SIG_ERR) {
-        perror("signal");
-        _exit(EXIT_FAILURE);
-    }
+    Signal(SIGINT, myshell_SIGINT);   /* ctrl-c */
+    Signal(SIGCHLD, myshell_SIGCHLD); 
+    Signal(SIGTSTP, myshell_SIGTSTP); /* ctrl-z */
 
     do {
         // 초기화
@@ -27,24 +17,20 @@ int main() {
         // 버퍼 비우기
         fflush(stdin);
         fflush(stdout);
-        
 
         // jobs 배열 초기화
         myshell_initJobs();
 
-        // 명령어 읽기 전에 프롬프트 출력 (중복 출력 방지)
-        if (prompt_ready) {
-            write(STDOUT_FILENO, prompt, strlen(prompt));
-            prompt_ready = 0;
-        }
+        // 프롬프트 출력
+        write(STDOUT_FILENO, prompt, strlen(prompt));
         
-        // 명령어 읽기
+        // 만약 백그라운드 프로세스의 종료로 인해 프롬프트가 입력받는 위치에 없다면, 입력을 기다리지 않고 새로운 프롬프트를 출력함
         myshell_readInput(cmdline);
-
+        
         // 명령어 파싱
         cmdline[strlen(cmdline) - 1] = ' ';
         myshell_parseInput(cmdline, commands, "|");
-
+        
         // 명령어 실행
         myshell_execCommand(commands);
 
@@ -102,7 +88,6 @@ void myshell_execCommand(char **commands) {
 
     // 명령어가 없으면 종료
     if (commands[0] == NULL) {
-        prompt_ready = 1;
         return;
     }
 
@@ -131,7 +116,7 @@ void myshell_execCommand(char **commands) {
             }
         }
 
-        //built-in 명령어는 사전 처리
+        // built-in 명령어는 사전 처리
         if (!strcmp(tokens[0], "exit")) {
             _exit(EXIT_SUCCESS);
         } else if (!strcmp(tokens[0], "cd")) {
@@ -141,23 +126,21 @@ void myshell_execCommand(char **commands) {
                 char *home = getenv("HOME");
                 if (home == NULL) {
                     perror("cd");
-                    continue;
+                    return;
                 }
                 chdir(home);
             } else {
                 // Change to specified directory
                 if (chdir(tokens[1]) < 0) {
                     perror("cd");
-                    continue;
+                    return;
                 }
             }
             i++;
-            prompt_ready = 1;
             continue;
         } else if (!strcmp(tokens[0], "jobs")) {
             // 작업 목록 출력
             myshell_listJobs();
-            prompt_ready = 1;
             i++;
             continue;
         } else if (!strcmp(tokens[0], "fg")) {
@@ -166,7 +149,6 @@ void myshell_execCommand(char **commands) {
                 pid_t fg_pid = atoi(tokens[1]);
                 myshell_fgJob(fg_pid);
             }
-            prompt_ready = 1;
             i++;
             continue;
         } else if (!strcmp(tokens[0], "bg")) {
@@ -175,7 +157,6 @@ void myshell_execCommand(char **commands) {
                 pid_t bg_pid = atoi(tokens[1]);
                 myshell_bgJob(bg_pid);
             }
-            prompt_ready = 1;
             i++;
             continue;
         } else if (!strcmp(tokens[0], "kill")) {
@@ -184,7 +165,6 @@ void myshell_execCommand(char **commands) {
                 pid_t kill_pid = atoi(tokens[1]);
                 myshell_killJob(kill_pid);
             }
-            prompt_ready = 1;
             i++;
             continue;
         }
@@ -220,10 +200,10 @@ void myshell_execCommand(char **commands) {
                 close(curr_pipe[1]);
             }
 
-            // 백그라운드 프로세스인 경우, SIGINT와 SIGTSTP 시그널 무시
+            // 백그라운드 프로세스인 경우, SIGINT와 SIGTSTP 시그널을 무시함
             if (background) {
-                signal(SIGINT, SIG_IGN);
-                signal(SIGTSTP, SIG_IGN);
+                Signal(SIGINT, SIG_IGN);
+                Signal(SIGTSTP, SIG_IGN);
             }
 
             // 명령어 실행
@@ -232,38 +212,30 @@ void myshell_execCommand(char **commands) {
             perror(tokens[0]);
             _exit(EXIT_FAILURE);
         }
-        // 부모 프로세스
-        else {
-            // jobs 배열에 작업 추가
-            if (background) {
-                myshell_addJob(getpid(), BG, commands[i]);
-            } else {
-                myshell_addJob(getpid(), FG, commands[i]);
-            }
-            // 이전 파이프 닫기
-            if (prev_pipe[0] != -1) {
-                close(prev_pipe[0]);
-                close(prev_pipe[1]);
-            }
-            // 현재 파이프를 이전 파이프로 설정
-            if (commands[i+1] != NULL) {
-                prev_pipe[0] = curr_pipe[0];
-                prev_pipe[1] = curr_pipe[1];
-            } else { 
-                // 마지막 명령어면 자식 프로세스 기다림
-                if (!background) {
-                    myshell_waitForJob(pid);
-                } else {
-                    // 백그라운드 프로세스인 경우, PID 출력
-                    write(STDOUT_FILENO, "\n", 1);
-                    write(STDOUT_FILENO, "Background process started > PID: ", 35);
-                    sprintf(pid_str, "%d\n", pid);
-                    write(STDOUT_FILENO, pid_str, strlen(pid_str));
-                }
-                // jobs 배열에서 작업 삭제
-                prompt_ready = 1;
-                return;
-            }
+        // jobs 배열에 작업 추가
+        if (background) {
+            myshell_addJob(getpid(), BG, commands[i]);
+        } else {
+            myshell_addJob(getpid(), FG, commands[i]);
+        }
+        // 이전 파이프 닫기
+        if (prev_pipe[0] != -1) {
+            close(prev_pipe[0]);
+            close(prev_pipe[1]);
+        }
+        // 현재 파이프를 이전 파이프로 설정
+        if (commands[i+1] != NULL) {
+            prev_pipe[0] = curr_pipe[0];
+            prev_pipe[1] = curr_pipe[1];
+        }
+        // 마지막 명령어면 자식 프로세스 기다림
+        if (!background) {
+            myshell_waitForJob(pid);
+
+        } else {
+            // 백그라운드 프로세스인 경우, PID 출력
+            sprintf(message, "Background process started > PID: %d\n", pid);
+            write(STDOUT_FILENO, message, strlen(message));
         }
         i++;
     }
@@ -306,7 +278,6 @@ void myshell_handleRedirection(char **tokens) {
 void myshell_SIGINT(int signal) {
     int olderr = errno;
     pid_t pid;
-
     // SIGINT 처리
     if (signal == SIGINT) {
         write(STDOUT_FILENO, "\nSIGINT received. Exiting...\n", 30);
@@ -321,70 +292,49 @@ void myshell_SIGINT(int signal) {
     }
 }
 
-// SIGCHLD 처리 함수. 자식 프로세스가 종료되어나 중지되었을 때 호출됨
+// SIGCHLD 처리 함수. 자식 프로세스가 종료되어나 중지되었을 때 호출됨s
 void myshell_SIGCHLD(int signal) {
-    int olderr = errno;
     pid_t pid;
     int status;
-
-    // 자식 프로세스가 종료되었을 때
     while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
-        // 해당 프로세스가 백그라운드 작업인 경우
-        if (WIFEXITED(status) && myshell_getJobState(pid) == BG) {
-            write(STDOUT_FILENO, "\nBackground process terminated > PID: ", 37);
-            char pid_str[10];
-            sprintf(pid_str, "%d\n", pid);
-            write(STDOUT_FILENO, pid_str, strlen(pid_str));
-            myshell_deleteJob(pid);  // 작업 삭제
-        }
-        // 포그라운드 프로세스가 중지된 경우
-        else if (WIFSTOPPED(status)) {
-            write(STDOUT_FILENO, "\nForeground process stopped > PID: ", 36);
-            char pid_str[10];
-            sprintf(pid_str, "%d\n", pid);
-            write(STDOUT_FILENO, pid_str, strlen(pid_str));
+        myshell_deleteJob(pid);  // 종료된 자식 프로세스 삭제
+        if (WIFEXITED(status)) {
+            // 자식 프로세스가 정상 종료된 경우
+            sprintf(message, "Child process terminated > PID: %d\n", pid);
+            write(STDOUT_FILENO, message, strlen(message));
+        } else if (WIFSTOPPED(status)) {
+            // 자식 프로세스가 중지된 경우
+            sprintf(message, "Child process stopped > PID: %d\n", pid);
+            write(STDOUT_FILENO, message, strlen(message));
             myshell_setJobState(pid, ST);  // 작업 상태 변경
         }
-        // 포그라운드 프로세스가 비정상적으로 종료된 경우
-        else if (WIFSIGNALED(status)) {
-            write(STDOUT_FILENO, "\nForeground process killed > PID: ", 37);
-            char pid_str[10];
-            sprintf(pid_str, "%d\n", pid);
-            write(STDOUT_FILENO, pid_str, strlen(pid_str));
-            // 종료 이유 출력
-            write(STDOUT_FILENO, "Killed by\n", 10);
-            sprintf(pid_str, "%d\n", WTERMSIG(status));
-            write(STDOUT_FILENO, pid_str, strlen(pid_str));
-            myshell_deleteJob(pid);  // 작업 삭제
-        }
     }
-    prompt_ready = 1;  // 프롬프트 출력 준비 완료
-    errno = olderr;
+    if (pid < 0 && errno != ECHILD) {
+        perror("waitpid error");
+    }
+    write(STDOUT_FILENO, "\n", 1);  // 줄바꿈
+    write(STDOUT_FILENO, prompt, strlen(prompt));  // 프롬프트 출력
     return;
 }
 void myshell_SIGTSTP(int signal) {
     int olderr = errno;
     pid_t pid;
     char pid_str[10];
-
-    // SIGTSTP 처리
-    if (signal == SIGTSTP) {
-        write(STDOUT_FILENO, "\nSIGTSTP received. Stopping...\n", 31);
-        // 모든 자식 프로세스 중지
-        for (int i = 0; i < MAXJOBS; i++) {
-            if (jobs[i].state != UNDEF) {
-                pid = jobs[i].pid;
-                kill(pid, SIGSTOP);
-                jobs[i].state = ST;  // 작업 상태 변경
-            }
+    write(STDOUT_FILENO, "\nSIGTSTP received. Stopping...\n", 31);
+    // 모든 자식 프로세스 중지
+    for (int i = 0; i < MAXJOBS; i++) {
+        if (jobs[i].state != UNDEF) {
+            pid = jobs[i].pid;
+            kill(pid, SIGSTOP);
+            jobs[i].state = ST;  // 작업 상태 변경
         }
-        write(STDOUT_FILENO, "Foreground process stopped > PID: ", 34);
-        sprintf(pid_str, "%d", pid);
-        write(STDOUT_FILENO, pid_str, strlen(pid_str));
-        write(STDOUT_FILENO, "\n", 1);
-        prompt_ready = 1;
     }
+    write(STDOUT_FILENO, "Foreground process stopped > PID: ", 34);
+    sprintf(pid_str, "%d", pid);
+    write(STDOUT_FILENO, pid_str, strlen(pid_str));
+    write(STDOUT_FILENO, "\n", 1);
     errno = olderr;
+    return;
 }
 void myshell_initJobs(void) {
     for (int i = 0; i < MAXJOBS; i++) {
@@ -398,7 +348,7 @@ void myshell_addJob(pid_t pid, int state, const char* cmd) {
         if (jobs[i].state == UNDEF) {
             jobs[i].pid = pid;
             jobs[i].state = state;
-            strncpy(jobs[i].cmdline, cmd, MAX_LENGTH_2);
+            strcpy(jobs[i].cmdline, cmd);
             jobs[i].cmdline[MAX_LENGTH_2 - 1] = '\0';  // null-terminate
             return;
         }
@@ -424,7 +374,14 @@ void myshell_listJobs(void) {
 }
 void myshell_waitForJob(pid_t pid) {
     int status;
-    waitpid(pid, &status, 0);
+    if(WIFSTOPPED(status)) {
+        myshell_setJobState(pid, ST);
+    } else {
+        if(WIFSIGNALED(status)) {
+        }
+        myshell_deleteJob(pid);
+    }
+    return;
 }
 void myshell_killJob(pid_t pid) {
     myshell_deleteJob(pid);
@@ -432,7 +389,6 @@ void myshell_killJob(pid_t pid) {
     char pid_str[10];
     sprintf(pid_str, "%d\n", pid);
     write(STDOUT_FILENO, pid_str, strlen(pid_str));
-    prompt_ready = 1;
     kill(pid, SIGKILL);
 }
 void myshell_fgJob(pid_t pid) {
@@ -441,7 +397,6 @@ void myshell_fgJob(pid_t pid) {
     char pid_str[10];
     sprintf(pid_str, "%d\n", pid);
     write(STDOUT_FILENO, pid_str, strlen(pid_str));
-    prompt_ready = 1;
     kill(pid, SIGCONT);
 }
 void myshell_bgJob(pid_t pid) {
@@ -450,7 +405,6 @@ void myshell_bgJob(pid_t pid) {
     char pid_str[10];
     sprintf(pid_str, "%d\n", pid);
     write(STDOUT_FILENO, pid_str, strlen(pid_str));
-    prompt_ready = 1;
     kill(pid, SIGCONT);
 }
 void myshell_setJobState(pid_t pid, int state) {
@@ -468,4 +422,17 @@ int myshell_getJobState(pid_t pid) {
         }
     }
     return UNDEF;
+}
+handler_t *Signal(int signum, handler_t *handler) 
+{
+    struct sigaction action, old_action;
+
+    action.sa_handler = handler;  
+    sigemptyset(&action.sa_mask); /* Block sigs of type being handled */
+    action.sa_flags = SA_RESTART; /* Restart syscalls if possible */
+
+    if (sigaction(signum, &action, &old_action) < 0)
+        perror("Signal error");
+
+    return (old_action.sa_handler);
 }

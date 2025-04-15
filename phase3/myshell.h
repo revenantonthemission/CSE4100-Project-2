@@ -2,6 +2,7 @@
 #define __MY_SHELL_3
 
 // Headers
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -19,7 +20,9 @@
 #include <sys/mman.h>
 #include <errno.h>
 #include <math.h>
-#include <assert.h>
+#include <pthread.h>
+#include <semaphore.h>
+
 
 // Constants & Macros
 #define MAX_LENGTH 32
@@ -50,7 +53,7 @@
 char prompt[] = "CSE4100-SP-P3> ";       /* command line prompt */
 int verbose = 0;            /* if true, print extra output */
 char message[MAX_LENGTH_2];         /* for composing sprintf messages */
-volatile sig_atomic_t prompt_ready = 1;
+sem_t prompt_ready;         /* semaphore for prompt */
 
 struct job_t {
     pid_t pid;              /* job PID */
@@ -58,6 +61,7 @@ struct job_t {
     char cmdline[MAX_LENGTH_2];  /* command line */
 };
 struct job_t jobs[MAXJOBS]; /* job list */
+typedef void handler_t(int);
 
 
 
@@ -79,4 +83,5 @@ void myshell_fgJob(pid_t);
 void myshell_bgJob(pid_t);
 void myshell_setJobState(pid_t, int);
 int myshell_getJobState(pid_t);
+handler_t *Signal(int signum, handler_t *handler);
 #endif

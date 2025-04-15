@@ -10,6 +10,8 @@
     "stat.h": "c",
     "stdarg.h": "c",
     "stdio.h": "c",
-    "stdlib.h": "c"
+    "stdlib.h": "c",
+    "cdefs.h": "c",
+    "math.h": "c"
   }
 }
