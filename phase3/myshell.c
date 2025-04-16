@@ -236,10 +236,10 @@ void myshell_execCommand(char **commands) {
                 // 마지막 명령어면 자식 프로세스 기다림
                 if (background) {
                     // 백그라운드 프로세스인 경우, PID 출력
-                    sprintf(pid_str, "%d", pid);
+                    add_job(pid, commands[i]); // Add job to job list
+                    sprintf(pid_str, "[%d] %d", job_count, pid);
                     write(STDOUT_FILENO, pid_str, strlen(pid_str));
                     write(STDOUT_FILENO, "\n", 1);
-                    add_job(pid, commands[i]); // Add job to job list
                 } else {
                     waitpid(pid, &status, 0);
                     tcsetpgrp(STDIN_FILENO, shell_pgid); // 셸 프로세스 그룹을 foreground로 설정
