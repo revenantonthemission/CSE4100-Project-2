@@ -4,12 +4,11 @@ int main() {
     // 변수 선언
     char cmdline[MAX_LENGTH_3], *commands[MAX_LENGTH];
     int i;
-    shell_pgid = getpid();
-    setpgid(shell_pgid, shell_pgid); // 셸 프로세스 그룹 ID 설정
 
     Signal(SIGINT, myshell_SIGINT);   /* ctrl-c */
     Signal(SIGCHLD, myshell_SIGCHLD); 
     Signal(SIGTSTP, myshell_SIGTSTP); /* ctrl-z */
+    setbuf(stdout, NULL);
 
     do {
         // 초기화
@@ -17,9 +16,9 @@ int main() {
         memset(commands, 0, MAX_LENGTH);
 
         tcsetpgrp(STDIN_FILENO, shell_pgid); // 셸 프로세스 그룹을 foreground로 설정
-
-        // 버퍼 비우기
-        fflush(stdout);
+        
+        /* Save default terminal attributes for shell.  */
+        tcgetattr (shell_terminal, &shell_tmodes);
 
         write(STDOUT_FILENO, prompt, strlen(prompt));
         
@@ -146,6 +145,8 @@ void myshell_execCommand(char **commands) {
             job_t *job = get_job_by_index(job_num);
             if (job != NULL) {
                 kill(job->pid, SIGCONT);
+                job->running = 1; // Mark job as running
+                tcsetpgrp(STDIN_FILENO, job->pid); // 자식 프로세스를 foreground로 설정
                 waitpid(job->pid, &status, 0);
                 job->running = 0; // Mark job as not running after completion
             }
@@ -284,6 +285,79 @@ void myshell_handleRedirection(char **tokens) {
     }
 }
 
+/* Find the active job with the indicated pgid.  */
+job *find_job (pid_t pgid)
+{
+  job *j;
+
+  for (j = first_job; j; j = j->next)
+    if (j->pgid == pgid)
+      return j;
+  return NULL;
+}
+
+/* Return true if all processes in the job have stopped or completed.  */
+int job_is_stopped (job *j)
+{
+  process *p;
+
+  for (p = j->first_process; p; p = p->next)
+    if (!p->completed && !p->stopped)
+      return 0;
+  return 1;
+}
+
+/* Return true if all processes in the job have completed.  */
+int job_is_completed (job *j)
+{
+  process *p;
+
+  for (p = j->first_process; p; p = p->next)
+    if (!p->completed)
+      return 0;
+  return 1;
+}
+
+/* Make sure the shell is running interactively as the foreground job
+   before proceeding. */
+
+void init_shell () {
+     /* See if we are running interactively.  */
+     shell_terminal = STDIN_FILENO;
+     shell_is_interactive = isatty (shell_terminal);
+   
+     if (shell_is_interactive)
+       {
+         /* Loop until we are in the foreground.  */
+         while (tcgetpgrp (shell_terminal) != (shell_pgid = getpgrp ()))
+           kill (- shell_pgid, SIGTTIN);
+   
+         /* Ignore interactive and job-control signals.  */
+         signal (SIGINT, SIG_IGN);
+         signal (SIGQUIT, SIG_IGN);
+         signal (SIGTSTP, SIG_IGN);
+         signal (SIGTTIN, SIG_IGN);
+         signal (SIGTTOU, SIG_IGN);
+         signal (SIGCHLD, SIG_IGN);
+   
+         /* Put ourselves in our own process group.  */
+         shell_pgid = getpid ();
+         if (setpgid (shell_pgid, shell_pgid) < 0)
+           {
+             perror ("Couldn't put the shell in its own process group");
+             exit (1);
+           }
+   
+        /* Grab control of the terminal.  */
+        tcsetpgrp (shell_terminal, shell_pgid);
+   
+        /* Save default terminal attributes for shell.  */
+        tcgetattr (shell_terminal, &shell_tmodes);
+    }
+}
+
+
+
 void add_job(pid_t pid, const char *cmdline) {
     if (job_count < MAX_JOBS) {
         job_list[job_count].pid = pid;
@@ -339,10 +413,13 @@ void myshell_SIGTSTP(int signal) {
             if (job_list[i].running) {
                 kill(job_list[i].pid, SIGTSTP);
                 printf("\n[Job %d] (%d) stopped and moved to background\n", i + 1, job_list[i].pid);
+                job_list[i].running = 0; // Mark job as not running
+                job_list[i].stopped = 1; // Mark job as stopped
                 break;
             }
         }
     }
+    // 현재 실행 중인 프로세스를 
 }
 void myshell_SIGTERM(int signal) {
     //write(STDOUT_FILENO, "SIGTERM received\n", 17);
