@@ -4,6 +4,8 @@ int main() {
     // 변수 선언
     char cmdline[MAX_LENGTH_3], *commands[MAX_LENGTH];
     int i;
+    shell_pgid = getpid();
+    setpgid(shell_pgid, shell_pgid); // 셸 프로세스 그룹 ID 설정
 
     Signal(SIGINT, myshell_SIGINT);   /* ctrl-c */
     Signal(SIGCHLD, myshell_SIGCHLD); 
@@ -14,11 +16,13 @@ int main() {
         memset(cmdline, '\0', MAX_LENGTH_3);
         memset(commands, 0, MAX_LENGTH);
 
+        tcsetpgrp(STDIN_FILENO, shell_pgid); // 셸 프로세스 그룹을 foreground로 설정
+
         // 버퍼 비우기
         fflush(stdout);
 
         write(STDOUT_FILENO, prompt, strlen(prompt));
-
+        
         // 만약 백그라운드 프로세스의 종료로 인해 프롬프트가 입력받는 위치에 없다면, 입력을 기다리지 않고 새로운 프롬프트를 출력함
         myshell_readInput(cmdline);
 
@@ -206,6 +210,8 @@ void myshell_execCommand(char **commands) {
             if (background) {
                 Signal(SIGINT, SIG_IGN);
                 Signal(SIGTSTP, SIG_IGN);
+            } else {
+                tcsetpgrp(STDIN_FILENO, getpid()); // 자식 프로세스를 foreground로 설정
             }
 
             // 명령어 실행
@@ -236,6 +242,7 @@ void myshell_execCommand(char **commands) {
                     add_job(pid, commands[i]); // Add job to job list
                 } else {
                     waitpid(pid, &status, 0);
+                    tcsetpgrp(STDIN_FILENO, shell_pgid); // 셸 프로세스 그룹을 foreground로 설정
                 }
             }
         }
@@ -310,11 +317,17 @@ void myshell_SIGINT(int signal) {
 void myshell_SIGCHLD(int signal) {
     pid_t pid;
     int status;
-    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        // Job control: mark the job as not running
-        for (int i = 0; i < job_count; i++) {
+    // 백그라운드 프로세스 종료 시그널 처리
+    // 자식 프로세스가 종료되면, 해당 프로세스의 PID를 가져옴
+    // WNOHANG 플래그를 사용하여 즉시 반환
+    while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
+        // 종료된 프로세스의 PID를 찾음
+        for (int i = 0; i < job_count; ++i) {
             if (job_list[i].pid == pid) {
-                job_list[i].running = 0;
+                job_list[i].running = 0; // Mark job as not running
+                write(STDOUT_FILENO, "\n", 1);
+                printf("Job [%d] (%d) terminated\n", i + 1, pid);
+                write(STDOUT_FILENO, prompt, strlen(prompt));
                 break;
             }
         }

@@ -43,6 +43,7 @@ char prompt[] = "CSE4100-SP-P3> ";       /* command line prompt */
 int verbose = 0;            /* if true, print extra output */
 char message[MAX_LENGTH_2];         /* for composing sprintf messages */
 int job_count = 0;
+pid_t shell_pgid;
 job_t job_list[MAX_JOBS];
 
 // Functions
