@@ -15,20 +15,14 @@ int main() {
         memset(commands, 0, MAX_LENGTH);
 
         // 버퍼 비우기
-        fflush(stdin);
         fflush(stdout);
 
-        // jobs 배열 초기화
-        myshell_initJobs();
-
-        // 프롬프트 출력
         write(STDOUT_FILENO, prompt, strlen(prompt));
-        
+
         // 만약 백그라운드 프로세스의 종료로 인해 프롬프트가 입력받는 위치에 없다면, 입력을 기다리지 않고 새로운 프롬프트를 출력함
         myshell_readInput(cmdline);
-        
+
         // 명령어 파싱
-        cmdline[strlen(cmdline) - 1] = ' ';
         myshell_parseInput(cmdline, commands, "|");
         
         // 명령어 실행
@@ -41,16 +35,15 @@ int main() {
 
 /* 명령어 입력을 읽는 함수 */
 void myshell_readInput(char *buf) {
-    read(STDIN_FILENO, buf, MAX_LENGTH_3);
+    fgets(buf, MAX_LENGTH_3, stdin);
 }
 
-/* 명령어를 파싱하는 함수 */
 void myshell_parseInput(char *buf, char **args, const char *delim) {
-    // 변수 선언
+    // Variables
     int i = 0;
     char *token;
 
-    // 앞뒤 공백 제거
+    // Remove leading and trailing whitespace
     while (isspace((unsigned char)*buf)) {
         buf++;
     }
@@ -58,10 +51,10 @@ void myshell_parseInput(char *buf, char **args, const char *delim) {
         buf[strlen(buf) - 1] = '\0';
     }
 
-    // 입력 문자열을 토큰화
+    // Tokenize the input string
     token = strtok(buf, delim);
     while (token != NULL) {
-        // 앞뒤 공백 제거
+        // Remove leading and trailing whitespace
         while (isspace((unsigned char)*token)) {
             token++;
         }
@@ -69,13 +62,13 @@ void myshell_parseInput(char *buf, char **args, const char *delim) {
             token[strlen(token) - 1] = '\0';
         }
 
-        // 토큰을 args 배열에 저장
+        // Store the token in the args array
         args[i++] = token;
 
-        // 다음 토큰 가져오기
+        // Get the next token
         token = strtok(NULL, delim);
     }
-    args[i] = NULL;  // args 배열을 널로 종료
+    args[i] = NULL;  // Null-terminate the args array
 }
 
 void myshell_execCommand(char **commands) {
@@ -126,44 +119,53 @@ void myshell_execCommand(char **commands) {
                 char *home = getenv("HOME");
                 if (home == NULL) {
                     perror("cd");
-                    return;
+                    continue;
                 }
                 chdir(home);
             } else {
                 // Change to specified directory
                 if (chdir(tokens[1]) < 0) {
                     perror("cd");
-                    return;
+                    continue;
                 }
             }
             i++;
             continue;
         } else if (!strcmp(tokens[0], "jobs")) {
-            // 작업 목록 출력
-            myshell_listJobs();
+            // 현재 실행 중인 프로세스 목록 출력
+            list_jobs();
             i++;
             continue;
         } else if (!strcmp(tokens[0], "fg")) {
             // 포그라운드 프로세스 재개
-            if (tokens[1] != NULL) {
-                pid_t fg_pid = atoi(tokens[1]);
-                myshell_fgJob(fg_pid);
+            int job_num = (tokens[1] != NULL) ? atoi(tokens[1] + 1) : job_count;
+            job_t *job = get_job_by_index(job_num);
+            if (job != NULL) {
+                kill(job->pid, SIGCONT);
+                waitpid(job->pid, &status, 0);
+                job->running = 0; // Mark job as not running after completion
             }
             i++;
             continue;
         } else if (!strcmp(tokens[0], "bg")) {
             // 백그라운드 프로세스 재개
-            if (tokens[1] != NULL) {
-                pid_t bg_pid = atoi(tokens[1]);
-                myshell_bgJob(bg_pid);
+            int job_num = (tokens[1] != NULL) ? atoi(tokens[1] + 1) : job_count;
+            job_t *job = get_job_by_index(job_num);
+            if (job != NULL) {
+                kill(job->pid, SIGCONT);
+                job->running = 1; // Mark job as running
             }
             i++;
             continue;
         } else if (!strcmp(tokens[0], "kill")) {
-            // 프로세스 종료
-            if (tokens[1] != NULL) {
-                pid_t kill_pid = atoi(tokens[1]);
-                myshell_killJob(kill_pid);
+            if (tokens[1] != NULL && tokens[1][0] == '%') {
+                int job_num = atoi(tokens[1] + 1);
+                job_t *job = get_job_by_index(job_num);
+                if (job != NULL) {
+                    kill(job->pid, SIGTERM);
+                    job->running = 0;
+                    printf("Job [%d] (%d) terminated\n", job_num, job->pid);
+                }
             }
             i++;
             continue;
@@ -208,34 +210,34 @@ void myshell_execCommand(char **commands) {
 
             // 명령어 실행
             myshell_handleRedirection(tokens);  // 리다이렉션 처리
+            setpgid(0, 0);  // 자식 프로세스의 그룹 ID 설정
             execvp(tokens[0], tokens);
             perror(tokens[0]);
             _exit(EXIT_FAILURE);
         }
-        // jobs 배열에 작업 추가
-        if (background) {
-            myshell_addJob(getpid(), BG, commands[i]);
-        } else {
-            myshell_addJob(getpid(), FG, commands[i]);
-        }
-        // 이전 파이프 닫기
-        if (prev_pipe[0] != -1) {
-            close(prev_pipe[0]);
-            close(prev_pipe[1]);
-        }
-        // 현재 파이프를 이전 파이프로 설정
-        if (commands[i+1] != NULL) {
-            prev_pipe[0] = curr_pipe[0];
-            prev_pipe[1] = curr_pipe[1];
-        }
-        // 마지막 명령어면 자식 프로세스 기다림
-        if (!background) {
-            myshell_waitForJob(pid);
-
-        } else {
-            // 백그라운드 프로세스인 경우, PID 출력
-            sprintf(message, "Background process started > PID: %d\n", pid);
-            write(STDOUT_FILENO, message, strlen(message));
+        else {
+            // 이전 파이프 닫기
+            if (prev_pipe[0] != -1) {
+                close(prev_pipe[0]);
+                close(prev_pipe[1]);
+            }
+            // 현재 파이프를 이전 파이프로 설정
+            if (commands[i+1] != NULL) {
+                prev_pipe[0] = curr_pipe[0];
+                prev_pipe[1] = curr_pipe[1];
+            }
+            else {
+                // 마지막 명령어면 자식 프로세스 기다림
+                if (background) {
+                    // 백그라운드 프로세스인 경우, PID 출력
+                    sprintf(pid_str, "%d", pid);
+                    write(STDOUT_FILENO, pid_str, strlen(pid_str));
+                    write(STDOUT_FILENO, "\n", 1);
+                    add_job(pid, commands[i]); // Add job to job list
+                } else {
+                    waitpid(pid, &status, 0);
+                }
+            }
         }
         i++;
     }
@@ -275,154 +277,64 @@ void myshell_handleRedirection(char **tokens) {
     }
 }
 
+void add_job(pid_t pid, const char *cmdline) {
+    if (job_count < MAX_JOBS) {
+        job_list[job_count].pid = pid;
+        strncpy(job_list[job_count].cmdline, cmdline, MAX_LENGTH_2);
+        job_list[job_count].running = 1;
+        job_count++;
+    }
+}
+
+void list_jobs() {
+    for (int i = 0; i < job_count; ++i) {
+        if (job_list[i].running)
+            printf("[%d] %d\t%s\n", i+1, job_list[i].pid, job_list[i].cmdline);
+    }
+}
+
+job_t *get_job_by_index(int idx) {
+    if (idx >= 1 && idx <= job_count)
+        return &job_list[idx-1];
+    return NULL;
+}
+
+
 void myshell_SIGINT(int signal) {
-    int olderr = errno;
+    write(STDOUT_FILENO, "SIGINT received\n", 17);
+    // 프롬프트로 돌아가기
+    // SIGINT 시그널을 무시하고 프롬프트로 돌아감
+    _exit(EXIT_SUCCESS);
+
+}
+void myshell_SIGCHLD(int signal) {
     pid_t pid;
-    // SIGINT 처리
-    if (signal == SIGINT) {
-        write(STDOUT_FILENO, "\nSIGINT received. Exiting...\n", 30);
-        // 모든 자식 프로세스 종료
-        for (int i = 0; i < MAXJOBS; i++) {
-            if (jobs[i].state != UNDEF) {
-                pid = jobs[i].pid;
-                kill(pid, SIGKILL);
-                jobs[i].state = UNDEF;  // 작업 상태 초기화
+    int status;
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        // Job control: mark the job as not running
+        for (int i = 0; i < job_count; i++) {
+            if (job_list[i].pid == pid) {
+                job_list[i].running = 0;
+                break;
             }
         }
     }
 }
-
-// SIGCHLD 처리 함수. 자식 프로세스가 종료되어나 중지되었을 때 호출됨s
-void myshell_SIGCHLD(int signal) {
-    pid_t pid;
-    int status;
-    while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
-        myshell_deleteJob(pid);  // 종료된 자식 프로세스 삭제
-        if (WIFEXITED(status)) {
-            // 자식 프로세스가 정상 종료된 경우
-            sprintf(message, "Child process terminated > PID: %d\n", pid);
-            write(STDOUT_FILENO, message, strlen(message));
-        } else if (WIFSTOPPED(status)) {
-            // 자식 프로세스가 중지된 경우
-            sprintf(message, "Child process stopped > PID: %d\n", pid);
-            write(STDOUT_FILENO, message, strlen(message));
-            myshell_setJobState(pid, ST);  // 작업 상태 변경
-        }
-    }
-    if (pid < 0 && errno != ECHILD) {
-        perror("waitpid error");
-    }
-    write(STDOUT_FILENO, "\n", 1);  // 줄바꿈
-    write(STDOUT_FILENO, prompt, strlen(prompt));  // 프롬프트 출력
-    return;
-}
 void myshell_SIGTSTP(int signal) {
-    int olderr = errno;
-    pid_t pid;
-    char pid_str[10];
-    write(STDOUT_FILENO, "\nSIGTSTP received. Stopping...\n", 31);
-    // 모든 자식 프로세스 중지
-    for (int i = 0; i < MAXJOBS; i++) {
-        if (jobs[i].state != UNDEF) {
-            pid = jobs[i].pid;
-            kill(pid, SIGSTOP);
-            jobs[i].state = ST;  // 작업 상태 변경
-        }
-    }
-    write(STDOUT_FILENO, "Foreground process stopped > PID: ", 34);
-    sprintf(pid_str, "%d", pid);
-    write(STDOUT_FILENO, pid_str, strlen(pid_str));
-    write(STDOUT_FILENO, "\n", 1);
-    errno = olderr;
-    return;
-}
-void myshell_initJobs(void) {
-    for (int i = 0; i < MAXJOBS; i++) {
-        jobs[i].pid = 0;
-        jobs[i].state = UNDEF;
-        jobs[i].cmdline[0] = '\0';
-    }
-}
-void myshell_addJob(pid_t pid, int state, const char* cmd) {
-    for (int i = 0; i < MAXJOBS; i++) {
-        if (jobs[i].state == UNDEF) {
-            jobs[i].pid = pid;
-            jobs[i].state = state;
-            strcpy(jobs[i].cmdline, cmd);
-            jobs[i].cmdline[MAX_LENGTH_2 - 1] = '\0';  // null-terminate
-            return;
+    if (job_count > 0) {
+        for (int i = job_count - 1; i >= 0; --i) {
+            if (job_list[i].running) {
+                kill(job_list[i].pid, SIGTSTP);
+                printf("\n[Job %d] (%d) stopped and moved to background\n", i + 1, job_list[i].pid);
+                break;
+            }
         }
     }
 }
-void myshell_deleteJob(pid_t pid) {
-    for (int i = 0; i < MAXJOBS; i++) {
-        if (jobs[i].pid == pid) {
-            jobs[i].pid = 0;
-            jobs[i].state = UNDEF;
-            jobs[i].cmdline[0] = '\0';
-            return;
-        }
-    }
+void myshell_SIGTERM(int signal) {
+    //write(STDOUT_FILENO, "SIGTERM received\n", 17);
 }
-void myshell_listJobs(void) {
-    for (int i = 0; i < MAXJOBS; i++) {
-        if (jobs[i].state != UNDEF) {
-            write(STDOUT_FILENO, jobs[i].cmdline, strlen(jobs[i].cmdline));
-            write(STDOUT_FILENO, "\n", 1);
-        }
-    }
-}
-void myshell_waitForJob(pid_t pid) {
-    int status;
-    if(WIFSTOPPED(status)) {
-        myshell_setJobState(pid, ST);
-    } else {
-        if(WIFSIGNALED(status)) {
-        }
-        myshell_deleteJob(pid);
-    }
-    return;
-}
-void myshell_killJob(pid_t pid) {
-    myshell_deleteJob(pid);
-    write(STDOUT_FILENO, "\nProcess killed > PID: ", 23);
-    char pid_str[10];
-    sprintf(pid_str, "%d\n", pid);
-    write(STDOUT_FILENO, pid_str, strlen(pid_str));
-    kill(pid, SIGKILL);
-}
-void myshell_fgJob(pid_t pid) {
-    myshell_setJobState(pid, FG);
-    write(STDOUT_FILENO, "\nForeground process resumed > PID: ", 36);
-    char pid_str[10];
-    sprintf(pid_str, "%d\n", pid);
-    write(STDOUT_FILENO, pid_str, strlen(pid_str));
-    kill(pid, SIGCONT);
-}
-void myshell_bgJob(pid_t pid) {
-    myshell_setJobState(pid, BG);
-    write(STDOUT_FILENO, "\nBackground process resumed > PID: ", 35);
-    char pid_str[10];
-    sprintf(pid_str, "%d\n", pid);
-    write(STDOUT_FILENO, pid_str, strlen(pid_str));
-    kill(pid, SIGCONT);
-}
-void myshell_setJobState(pid_t pid, int state) {
-    for (int i = 0; i < MAXJOBS; i++) {
-        if (jobs[i].pid == pid) {
-            jobs[i].state = state;
-            return;
-        }
-    }
-}
-int myshell_getJobState(pid_t pid) {
-    for (int i = 0; i < MAXJOBS; i++) {
-        if (jobs[i].pid == pid) {
-            return jobs[i].state;
-        }
-    }
-    return UNDEF;
-}
+
 handler_t *Signal(int signum, handler_t *handler) 
 {
     struct sigaction action, old_action;

@@ -1,4 +1,4 @@
- #ifndef __MY_SHELL_3
+#ifndef __MY_SHELL_3
 #define __MY_SHELL_3
 
 // Headers
@@ -23,65 +23,41 @@
 #include <pthread.h>
 #include <semaphore.h>
 
-
 // Constants & Macros
 #define MAX_LENGTH 32
 #define MAX_LENGTH_2 1024
 #define MAX_LENGTH_3 32768
+#define MAX_JOBS 128
 
-// code/ecf/shell.c에서 일단 그대로 가져와 봄.
+typedef struct {
+    pid_t pid;
+    char cmdline[MAX_LENGTH_2];
+    int running;
+    int stopped; // Added to track if the job is stopped
+} job_t;
 
-#define MAXARGS   128
-#define MAXJOBS    16
-
-/* Job states */
-#define UNDEF 0 /* undefined */
-#define FG 1    /* running in foreground */
-#define BG 2    /* running in background */
-#define ST 3    /* stopped */
-
-/* 
- * Job state transitions and enabling actions:
- *     FG -> ST  : ctrl-z
- *     ST -> FG  : "fg pid"
- *     ST -> BG  : "bg pid"
- *     BG -> FG  : "fg pid"
- * At most 1 job can be in the FG state.
- */
+typedef void handler_t(int);
 
 /* begin global variables */
 char prompt[] = "CSE4100-SP-P3> ";       /* command line prompt */
 int verbose = 0;            /* if true, print extra output */
 char message[MAX_LENGTH_2];         /* for composing sprintf messages */
-sem_t prompt_ready;         /* semaphore for prompt */
-
-struct job_t {
-    pid_t pid;              /* job PID */
-    int state;              /* UNDEF, BG, FG, or ST */
-    char cmdline[MAX_LENGTH_2];  /* command line */
-};
-struct job_t jobs[MAXJOBS]; /* job list */
-typedef void handler_t(int);
-
-
+int job_count = 0;
+job_t job_list[MAX_JOBS];
 
 // Functions
+void add_job(pid_t pid, const char *cmdline);
+void list_jobs();
+job_t *get_job_by_index(int idx);
 void myshell_readInput(char *);
 void myshell_parseInput(char *, char **, const char *);
 void myshell_execCommand(char **);
 void myshell_handleRedirection(char **);
+void myshell_handleBuiltin(char **);
 void myshell_SIGINT(int);
 void myshell_SIGCHLD(int);
-void myshell_SIGTSTP(int);
-void myshell_initJobs(void);
-void myshell_addJob(pid_t, int, const char*);
-void myshell_deleteJob(pid_t);
-void myshell_listJobs(void);
-void myshell_waitForJob(pid_t);
-void myshell_killJob(pid_t);
-void myshell_fgJob(pid_t);
-void myshell_bgJob(pid_t);
-void myshell_setJobState(pid_t, int);
-int myshell_getJobState(pid_t);
+void myshell_SIGTSTP(int); // Ensure declaration is present
+void myshell_SIGTERM(int);
+
 handler_t *Signal(int signum, handler_t *handler);
 #endif
