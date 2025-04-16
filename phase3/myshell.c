@@ -14,11 +14,15 @@ int main()
 
     do
     {
-        memset(cmdline, '\0', MAX_LENGTH_3);
-        memset(commands, 0, MAX_LENGTH);
+
         if(setjmp(buffer)) {
             fputs("longjmp has been called\n", stdout);
         }
+
+        fflush(stdout);
+        
+        memset(cmdline, '\0', MAX_LENGTH_3);
+        memset(commands, 0, MAX_LENGTH);
 
         // 명령어 입력
         myshell_readInput(cmdline);
@@ -143,6 +147,8 @@ void myshell_execCommand(char **commands)
     process *last_proc = NULL;
     char full_cmd[MAX_LENGTH_3] = "";
     char *args[MAX_LENGTH_2];
+
+    do_job_notification();
 
     // 우선 각 명령어를 확인한다.
     while (commands[i] != NULL && shell_is_interactive)
@@ -559,6 +565,15 @@ void launch_job(job *j, int foreground)
     int mypipe[2], infile, outfile;
 
     infile = j->stdin;
+    // 백그라운드 작업일 경우 stdin을 /dev/null로 설정
+    if (!foreground && (infile == STDIN_FILENO)) {
+        infile = open("/dev/null", O_RDONLY);
+        if (infile < 0) {
+            perror("open /dev/null");
+            _exit(EXIT_FAILURE);
+        }
+    }
+
     for (p = j->first_process; p; p = p->next)
     {
         /* Set up pipes, if necessary.  */
@@ -567,7 +582,7 @@ void launch_job(job *j, int foreground)
             if (pipe(mypipe) < 0)
             {
                 perror("pipe");
-                exit(1);
+                _exit(EXIT_FAILURE);
             }
             outfile = mypipe[1];
         }
@@ -583,7 +598,7 @@ void launch_job(job *j, int foreground)
         {
             /* The fork failed.  */
             perror("fork");
-            exit(1);
+            _exit(EXIT_FAILURE);
         }
         else
         {
@@ -609,10 +624,14 @@ void launch_job(job *j, int foreground)
 
     if (!shell_is_interactive)
         wait_for_job(j);
-    else if (foreground)
+    else if (foreground) {
         put_job_in_foreground(j, 0);
-    else
+    }
+    else {
         put_job_in_background(j, 0);
+        do_job_notification();
+        fflush(stdout);
+    }
 }
 
 /* Put job j in the foreground.  If cont is nonzero,
@@ -831,22 +850,40 @@ void free_job(job *j) {
     j->first_process = NULL;
     free(j);
 }
+
+// 현재 포그라운드 작업을 얻는 함수
+job *get_foreground_job(void) {
+    for (job *j = first_job; j; j = j->next) {
+        if (!job_is_completed(j) && !job_is_stopped(j) && (!tcgetpgrp(shell_terminal)) == shell_pgid) {
+            return j;
+        }
+    }
+    return NULL;
+}
+
 void myshell_SIGINT(int signal) {
-    // 만약 포그라운드 작업이 실행 중이면 그 프로세스 그룹에 SIGINT 전달
-    // 예: kill(-current_fg_pgid, SIGINT);
-    // 그렇지 않으면 프롬프트를 재출력하거나 현재 입력을 취소
-    write(STDOUT_FILENO, "\n", 1);
-    // setjmp/longjmp를 사용해 현재 명령 입력을 취소할 수 있음.
+    // 포그라운드 작업이 있을 때만 해당 작업에 시그널 전달
+    job *j = get_foreground_job();
+    if (j != NULL) {
+        kill(-j->pgid, SIGINT);
+    } else {
+        // 포그라운드 작업이 없으면 새 프롬프트 출력
+        write(STDOUT_FILENO, "\n", 1);
+        write(STDOUT_FILENO, prompt, strlen(prompt));
+    }
+    longjmp(buffer, 1); // 현재 명령 입력 취소
 }
 
 void myshell_SIGCHLD(int signal) {
     pid_t pid;
     int status;
+    
     while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
-        // 내부적으로 mark_process_status와 do_job_notification 함수를 호출하여
-        // 잡 테이블을 업데이트합니다.
         mark_process_status(pid, status);
     }
+    
+    // 작업 상태 변경 통지
+    do_job_notification();
 }
 
 void myshell_SIGTSTP(int signal) {
