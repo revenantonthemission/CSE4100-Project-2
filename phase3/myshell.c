@@ -5,36 +5,40 @@ int main()
     // 변수 선언
     char cmdline[MAX_LENGTH_3], *commands[MAX_LENGTH];
     int i;
-    shell_pgid = getpid();
-    setpgid(shell_pgid, shell_pgid); // 셸 프로세스 그룹 ID 설정
 
-    Signal(SIGINT, myshell_SIGINT); /* ctrl-c */
-    Signal(SIGCHLD, myshell_SIGCHLD);
-    Signal(SIGTSTP, myshell_SIGTSTP); /* ctrl-z */
-    Signal(SIGTERM, myshell_SIGTERM);
+    // 쉘의 pid를 쉘의 프로세스 그룹 ID로 설정함.
+    shell_pgid = getpid();
+    setpgid(shell_pgid, shell_pgid);
+    // 셸 프로세스 그룹을 foreground로 설정
+    tcsetpgrp(STDIN_FILENO, shell_pgid);
+
+    Signal(SIGINT, myshell_SIGINT);   // ctrl-c를 누를 때 myshell_SIGINT가 호출됨.
+    Signal(SIGCHLD, myshell_SIGCHLD); // 자식 프로세스가 종료될 때 myshell_SIGCHLD가 호출됨.
+    Signal(SIGTSTP, myshell_SIGTSTP); // ctrl-z를 누를 때 myshell_SIGTSTP가 호출됨.
 
     do
     {
-        // 초기화
-        memset(cmdline, '\0', MAX_LENGTH_3);
-        memset(commands, 0, MAX_LENGTH);
 
         setjmp(jump);
-
-        tcsetpgrp(STDIN_FILENO, shell_pgid); // 셸 프로세스 그룹을 foreground로 설정
 
         // 버퍼 비우기
         fflush(stdout);
 
+        // 초기화
+        memset(cmdline, '\0', MAX_LENGTH_3);
+        memset(commands, 0, MAX_LENGTH);
+
+        // 프롬프트 출력
+        write(STDOUT_FILENO, prompt, strlen(prompt));
+
         // 만약 백그라운드 프로세스의 종료로 인해 프롬프트가 입력받는 위치에 없다면, 입력을 기다리지 않고 새로운 프롬프트를 출력함
         myshell_readInput(cmdline);
 
-        // 명령어 파싱
+        // 파이프를 기준으로 전체 커맨드를 나누어 commands에 담음.
         myshell_parseInput(cmdline, commands, "|");
 
         // 명령어 실행
         myshell_execCommand(commands);
-
     } while (1);
 
     return 0;
@@ -43,7 +47,7 @@ int main()
 /* 명령어 입력을 읽는 함수 */
 void myshell_readInput(char *buf)
 {
-    write(STDOUT_FILENO, prompt, strlen(prompt));
+    // 커맨드 입력
     fgets(buf, MAX_LENGTH_3, stdin);
 }
 
@@ -89,10 +93,11 @@ void myshell_parseInput(char *buf, char **args, const char *delim)
 void myshell_execCommand(char **commands)
 {
     int i = 0;
-    int status, background, last_token;
+    int status, background, last_token, job_num;
     int prev_pipe[2] = {-1, -1};
     int curr_pipe[2];
     pid_t pid;
+    job_t *job;
     char *tokens[MAX_LENGTH], pid_str[10];
 
     // 명령어가 없으면 종료
@@ -132,20 +137,23 @@ void myshell_execCommand(char **commands)
             }
         }
 
-        // built-in 명령어는 사전 처리
+        // built-in 명령어 처리.
         if (!strcmp(tokens[0], "exit"))
         {
+            // exit: 쉘 자체를 종료한다.
             _exit(EXIT_SUCCESS);
         }
         else if (!strcmp(tokens[0], "cd"))
         {
-            // Change directory
+            // cd: Change directory. 현재 쉘이 위치한 경로를 바꾼다. tokens[1]에 가고자 하는 디렉토리가 적혀있음.
             if (tokens[1] == NULL)
             {
-                // Change to home directory
+                // 디렉토리가 명시되어 있지 않은 경우 홈 디렉토리로 이동함,
+                // 이때 getenv 함수를 통해 홈 디렉토리를 얻은 뒤 그곳으로 이동한다.
                 char *home = getenv("HOME");
                 if (home == NULL)
                 {
+                    // 다음 명령을 시도해야 하기 때문에 continue로 while문을 탈출한다.
                     perror("cd");
                     continue;
                 }
@@ -153,9 +161,11 @@ void myshell_execCommand(char **commands)
             }
             else
             {
-                // Change to specified directory
+                // chdir 함수를 통해 tokens[1]에 적힌 디렉토리로 이동을 시도함.
+                // 만약 실패한다면 반환값은 -1이다.
                 if (chdir(tokens[1]) < 0)
                 {
+                    // 다음 명령을 시도해야 하기 때문에 continue로 while문을 탈출한다.
                     perror("cd");
                     continue;
                 }
@@ -165,35 +175,62 @@ void myshell_execCommand(char **commands)
         }
         else if (!strcmp(tokens[0], "jobs"))
         {
-            // 현재 실행 중인 프로세스 목록 출력
+            // 현재 실행 중인 프로세스 목록을 출력한다.
             list_jobs();
+
+            // 다음 명령을 시도해야 하기 때문에 continue로 while문을 탈출한다.
             i++;
             continue;
         }
         else if (!strcmp(tokens[0], "fg"))
         {
-            // 포그라운드 프로세스 재개
-            int job_num = (tokens[1] != NULL) ? atoi(tokens[1] + 1) : job_count;
-            job_t *job = get_job_by_index(job_num);
-            if (job != NULL)
+            // 백그라운드에 있던 작업을 포그라운드로 가져온다.
+            // 중지됐거나 백그라운드로 실행 중인 작업이 백그라운드에 있다.
+
+            // tokens[1]을 통해 현재 백그라운드에 있는 작업을 지s정한다.
+            if (tokens[1] != NULL && tokens[1][0] == '%')
             {
-                kill(job->pid, SIGCONT);
-                waitpid(job->pid, &status, 0);
-                job->running = 0; // Mark job as not running after completion
+                // job_num으로 지정한 작업을 가져온다.
+                job_num = atoi(&tokens[1][1]) - 1;
+                job = get_job_by_index(job_num);
+                // 이렇게 가져온 job이 실제로 있다면, job의 상태를 RUNNING으로 바꾸고 해당 작업을 다시 활성화하기 위해 SIGCONT 시그널을 보낸다.
+                // 그리고 터미널 통제권을 가져온다.
+                if (job != NULL)
+                {
+                    job->state = RUNNING;
+                    kill(-(job->pid), SIGCONT);
+                    tcsetpgrp(STDIN_FILENO, job->pid);
+                }
+                
+            } else {
+                // 예외 처리
             }
+
+            // 다음 명령을 시도해야 하기 때문에 continue로 while문을 탈출한다.
             i++;
             continue;
         }
         else if (!strcmp(tokens[0], "bg"))
         {
-            // 백그라운드 프로세스 재개
-            int job_num = (tokens[1] != NULL) ? atoi(tokens[1] + 1) : job_count;
-            job_t *job = get_job_by_index(job_num);
-            if (job != NULL)
+            // tokens[1]을 통해 현재 백그라운드에 있는 작업을 지s정한다.
+            if (tokens[1] != NULL && tokens[1][0] == '%')
             {
-                kill(job->pid, SIGCONT);
-                job->running = 1; // Mark job as running
+
+                // job_num으로 지정한 작업을 가져온다.
+                job_num = atoi(&tokens[1][1]);
+                job = get_job_by_index(job_num);
+                // 이렇게 가져온 job이 실제로 있다면, job의 상태를 RUNNING으로 바꾸고 해당 작업을 다시 활성화하기 위해 SIGCONT 시그널을 보낸다.
+                // 그리고 터미널 통제권을 가져온다.
+                if (job != NULL)
+                {
+                    job->state = RUNNING;
+                    kill(-(job->pid), SIGCONT);
+                }
+            } else {
+                // 예외 처리
             }
+
+            // 다음 명령을 시도해야 하기 때문에 continue로 while문을 탈출한다.
             i++;
             continue;
         }
@@ -205,9 +242,7 @@ void myshell_execCommand(char **commands)
                 job_t *job = get_job_by_index(job_num);
                 if (job != NULL)
                 {
-                    kill(job->pid, SIGTERM);
-                    job->running = 0;
-                    printf("Job [%d] (%d) terminated\n", job_num, job->pid);
+                    // 지정된 시그널을 보냄.
                 }
             }
             i++;
@@ -231,9 +266,11 @@ void myshell_execCommand(char **commands)
             perror("fork");
             _exit(EXIT_FAILURE);
         }
-        // 자식 프로세스
-        if (pid == 0)
+        // 자식 프로세스는 이 부분을 실행한다.
+        else if (pid == 0)
         {
+            // 자식 프로세스의 그룹 ID 설정
+            setpgid(0, 0);
 
             // 이전 파이프에서 입력 리다이렉션
             if (prev_pipe[0] != -1)
@@ -252,23 +289,19 @@ void myshell_execCommand(char **commands)
             }
 
             // 백그라운드 프로세스인 경우, SIGINT와 SIGTSTP 시그널을 무시함
-            if (background)
+            /*if (background)
             {
                 Signal(SIGINT, SIG_IGN);
                 Signal(SIGTSTP, SIG_IGN);
-            }
-            else
-            {
-                tcsetpgrp(STDIN_FILENO, getpid()); // 자식 프로세스를 foreground로 설정
-            }
+            }*/
 
             // 명령어 실행
             myshell_handleRedirection(tokens); // 리다이렉션 처리
-            setpgid(0, 0);                     // 자식 프로세스의 그룹 ID 설정
             execvp(tokens[0], tokens);
             perror(tokens[0]);
             _exit(EXIT_FAILURE);
         }
+        // 부모 프로세스는 이 부분을 실행한다.
         else
         {
             // 이전 파이프 닫기
@@ -289,15 +322,25 @@ void myshell_execCommand(char **commands)
                 if (background)
                 {
                     // 백그라운드 프로세스인 경우, PID 출력
-                    add_job(pid, commands[i]); // Add job to job list
+                    add_job(pid, commands[i], RUNNING); // Add job to job list
                     sprintf(pid_str, "[%d] %d", job_count, pid);
                     write(STDOUT_FILENO, pid_str, strlen(pid_str));
                     write(STDOUT_FILENO, "\n", 1);
                 }
                 else
                 {
-                    waitpid(pid, &status, 0);
+                    foreground_pid = pid;
+                    foreground_cmd = commands[i];
+                    tcsetpgrp(STDIN_FILENO, foreground_pid);
+
+                    do
+                    {
+                        waitpid(pid, &status, 0);
+                    } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+
                     tcsetpgrp(STDIN_FILENO, shell_pgid); // 셸 프로세스 그룹을 foreground로 설정
+                    //foreground_cmd = shell;
+                    //foreground_pid = shell_pgid;
                 }
             }
         }
@@ -345,13 +388,21 @@ void myshell_handleRedirection(char **tokens)
     }
 }
 
-void add_job(pid_t pid, const char *cmdline)
+void add_job(pid_t pid, const char *cmdline, char state)
 {
     if (job_count < MAX_JOBS)
     {
         job_list[job_count].pid = pid;
         strncpy(job_list[job_count].cmdline, cmdline, MAX_LENGTH_2);
-        job_list[job_count].running = 1;
+        job_list[job_count].state = state;
+        switch(state) {
+            case RUNNING:
+                kill(pid, SIGCONT);
+                break;
+            case STOPPED:
+                kill(pid, SIGSTOP);
+                break;
+        }
         job_count++;
     }
 }
@@ -360,7 +411,7 @@ void list_jobs()
 {
     for (int i = 0; i < job_count; ++i)
     {
-        if (job_list[i].running)
+        if (job_list[i].state != RUNNING)
             printf("[%d] %d\t%s\n", i + 1, job_list[i].pid, job_list[i].cmdline);
     }
 }
@@ -392,18 +443,19 @@ void myshell_SIGCHLD(int signal)
             if (job_list[i].pid == pid)
             {
                 found_idx = i;
-                job_list[i].running = 0; // Mark job as not running
                 write(STDOUT_FILENO, "\n", 1);
                 printf("Job [%d] (%d) terminated\n", i + 1, pid);
                 write(STDOUT_FILENO, prompt, strlen(prompt));
                 break;
             }
         }
-        
+
         // 종료된 작업을 찾았을 때만 배열 시프트
-        if (found_idx >= 0) {
+        if (found_idx >= 0)
+        {
             // 발견된 인덱스부터 배열 시프트
-            for (int j = found_idx; j < job_count - 1; j++) {
+            for (int j = found_idx; j < job_count - 1; j++)
+            {
                 job_list[j] = job_list[j + 1];
             }
             job_count--;
@@ -413,23 +465,14 @@ void myshell_SIGCHLD(int signal)
 
 void myshell_SIGTSTP(int signal)
 {
-    if (job_count > 0)
-    {
-        for (int i = job_count - 1; i >= 0; --i)
-        {
-            if (job_list[i].running)
-            {
-                kill(job_list[i].pid, SIGTSTP);
-                printf("\n[Job %d] (%d) stopped and moved to background\n", i + 1, job_list[i].pid);
-                break;
-            }
-        }
-    }
-    write(STDOUT_FILENO, "\n", 1);
-    longjmp(jump, signal);
-}
-void myshell_SIGTERM(int signal)
-{
+    // 현재 실행 중인 프로세스를 정지시킨다.
+    //kill(foreground_pid, SIGSTOP);
+
+    // jobs에 현재 실행 중인 프로세스를 추가한다.
+    add_job(foreground_pid, foreground_cmd, STOPPED);
+
+    fprintf(stdout, "myshell: suspended %s\n", foreground_cmd);
+
     longjmp(jump, signal);
 }
 

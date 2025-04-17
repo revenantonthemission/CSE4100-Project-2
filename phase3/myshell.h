@@ -29,26 +29,30 @@
 #define MAX_LENGTH_3 32768
 #define MAX_JOBS 128
 
+#define RUNNING 0 // Currently running or waiting to run
+#define STOPPED 1 // SIGSTOP, SIGTSTP, SIGTTIN, SIGTTOU
+
 typedef struct {
     pid_t pid;
     char cmdline[MAX_LENGTH_2];
-    int running;
-    int stopped; // Added to track if the job is stopped
+    char state; // RUNNING or STOPPED
 } job_t;
 
 typedef void handler_t(int);
 
 /* begin global variables */
 char prompt[] = "CSE4100-SP-P3> ";       /* command line prompt */
-int verbose = 0;            /* if true, print extra output */
+char shell[] = "./myshell";
 char message[MAX_LENGTH_2];         /* for composing sprintf messages */
+char *foreground_cmd = NULL;
 volatile sig_atomic_t job_count = 0;
+volatile pid_t foreground_pid = 0;
 pid_t shell_pgid;
 job_t job_list[MAX_JOBS];
 jmp_buf jump;
 
 // Functions
-void add_job(pid_t pid, const char *cmdline);
+void add_job(pid_t pid, const char *cmdline, char state);
 void list_jobs();
 job_t *get_job_by_index(int idx);
 void myshell_readInput(char *);
