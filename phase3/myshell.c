@@ -377,20 +377,21 @@ void myshell_SIGINT(int signal)
     write(STDOUT_FILENO, "SIGINT received\n", 17);
     longjmp(jump, signal);
 }
+
 void myshell_SIGCHLD(int signal)
 {
     pid_t pid;
     int status;
     // 백그라운드 프로세스 종료 시그널 처리
-    // 자식 프로세스가 종료되면, 해당 프로세스의 PID를 가져옴
-    // WNOHANG 플래그를 사용하여 즉시 반환
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
     {
+        int found_idx = -1;
         // 종료된 프로세스의 PID를 찾음
         for (int i = 0; i < job_count; ++i)
         {
             if (job_list[i].pid == pid)
             {
+                found_idx = i;
                 job_list[i].running = 0; // Mark job as not running
                 write(STDOUT_FILENO, "\n", 1);
                 printf("Job [%d] (%d) terminated\n", i + 1, pid);
@@ -398,13 +399,18 @@ void myshell_SIGCHLD(int signal)
                 break;
             }
         }
-        for (int j = 1; j <= job_count; j++)
-        {
-            job_list[j - 1] = job_list[j];
+        
+        // 종료된 작업을 찾았을 때만 배열 시프트
+        if (found_idx >= 0) {
+            // 발견된 인덱스부터 배열 시프트
+            for (int j = found_idx; j < job_count - 1; j++) {
+                job_list[j] = job_list[j + 1];
+            }
+            job_count--;
         }
-        job_count--;
     }
 }
+
 void myshell_SIGTSTP(int signal)
 {
     if (job_count > 0)
@@ -419,6 +425,7 @@ void myshell_SIGTSTP(int signal)
             }
         }
     }
+    write(STDOUT_FILENO, "\n", 1);
     longjmp(jump, signal);
 }
 void myshell_SIGTERM(int signal)
