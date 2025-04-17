@@ -259,11 +259,13 @@ void myshell_execCommand(char **commands)
         {
             if (tokens[1] != NULL && tokens[1][0] == '%')
             {
-                int job_num = atoi(tokens[1] + 1);
+                // job_num으로 지정한 작업을 가져온다.
+                int job_num = atoi(&tokens[1][1]);
                 job_t *job = get_job_by_index(job_num);
                 if (job != NULL)
                 {
                     // 지정된 시그널을 보냄.
+                    kill(-(job->pid), SIGTERM);
                 }
             }
             i++;
@@ -308,13 +310,6 @@ void myshell_execCommand(char **commands)
                 dup2(curr_pipe[1], STDOUT_FILENO);
                 close(curr_pipe[1]);
             }
-
-            // 백그라운드 프로세스인 경우, SIGINT와 SIGTSTP 시그널을 무시함
-            /*if (background)
-            {
-                Signal(SIGINT, SIG_IGN);
-                Signal(SIGTSTP, SIG_IGN);
-            }*/
 
             // 명령어 실행
             myshell_handleRedirection(tokens); // 리다이렉션 처리

@@ -42,7 +42,6 @@ typedef void handler_t(int);
 
 /* begin global variables */
 char prompt[] = "CSE4100-SP-P3> ";       /* command line prompt */
-char shell[] = "./myshell";
 char message[MAX_LENGTH_2];         /* for composing sprintf messages */
 char *foreground_cmd = NULL;
 volatile sig_atomic_t job_count = 0;
@@ -62,8 +61,7 @@ void myshell_handleRedirection(char **);
 void myshell_handleBuiltin(char **);
 void myshell_SIGINT(int);
 void myshell_SIGCHLD(int);
-void myshell_SIGTSTP(int); // Ensure declaration is present
-void myshell_SIGTERM(int);
+void myshell_SIGTSTP(int);
 
 handler_t *Signal(int signum, handler_t *handler);
 #endif
