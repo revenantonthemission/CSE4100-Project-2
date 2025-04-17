@@ -41,14 +41,14 @@ typedef struct {
 typedef void handler_t(int);
 
 /* begin global variables */
-char prompt[] = "CSE4100-SP-P3> ";       /* command line prompt */
+char prompt[] = "CSE4100-SP-P2> ";       /* command line prompt */
 char message[MAX_LENGTH_2];         /* for composing sprintf messages */
 char *foreground_cmd = NULL;
 volatile sig_atomic_t job_count = 0;
 volatile pid_t foreground_pid = 0;
 pid_t shell_pgid;
 job_t job_list[MAX_JOBS];
-jmp_buf jump;
+sigjmp_buf jump;
 
 // Functions
 void add_job(pid_t pid, const char *cmdline, char state);

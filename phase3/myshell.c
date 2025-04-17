@@ -15,13 +15,14 @@ int main()
     Signal(SIGINT, myshell_SIGINT);   // ctrl-c를 누를 때 myshell_SIGINT가 호출됨.
     Signal(SIGCHLD, myshell_SIGCHLD); // 자식 프로세스가 종료될 때 myshell_SIGCHLD가 호출됨.
     Signal(SIGTSTP, myshell_SIGTSTP); // ctrl-z를 누를 때 myshell_SIGTSTP가 호출됨.
-    Signal(SIGTTOU, SIG_IGN);
-    Signal(SIGTTIN, SIG_IGN);
+    signal(SIGTTOU, SIG_IGN); // 터미널의 제어권을 가지지 못한 프로세스에서 출력하지 못하게 함.
+    signal(SIGTTIN, SIG_IGN); // 터미널의 제어권을 가지지 못한 프로세스가 입력을 받지 못하게 함.
 
     do
     {
-
-        setjmp(jump);
+        // siglongjmp() 함수를 호출하면 메인 루프의 처음으로 다시 돌아온다.
+        sigsetjmp(jump, 1);
+        sigsetjmp(jump, 3);
 
         // 버퍼 비우기
         fflush(stdout);
@@ -31,7 +32,8 @@ int main()
         memset(commands, 0, MAX_LENGTH);
 
         // 프롬프트 출력
-        write(STDOUT_FILENO, prompt, strlen(prompt));
+        sprintf(message, prompt, strlen(prompt));
+        write(STDOUT_FILENO, message, strlen(message));
 
         // 만약 백그라운드 프로세스의 종료로 인해 프롬프트가 입력받는 위치에 없다면, 입력을 기다리지 않고 새로운 프롬프트를 출력함
         myshell_readInput(cmdline);
@@ -200,7 +202,7 @@ void myshell_execCommand(char **commands)
                 if (job != NULL)
                 {
                     // 1. foreground 정보 갱신
-                    
+
                     foreground_pid = job->pid;
                     foreground_cmd = job->cmdline;
 
@@ -211,7 +213,11 @@ void myshell_execCommand(char **commands)
                     kill(-(job->pid), SIGCONT);
 
                     // 4. 종료/중지될 때까지 대기
-                    waitpid(job->pid, &status, 0);
+                    waitpid(job->pid, &status, WNOHANG | WUNTRACED);
+                    if (WIFSTOPPED(status))
+                    {
+                        job->state = STOPPED;  //job_list에 남겨 두기
+                    }
                     // 5. 다시 쉘이 터미널 제어권 획득
                     tcsetpgrp(STDIN_FILENO, shell_pgid);
 
@@ -219,10 +225,28 @@ void myshell_execCommand(char **commands)
                     foreground_pid = 0;
                     foreground_cmd = NULL;
                 }
+                else
+                {
+                    perror("fg");
+                }
             }
             else
             {
-                // 예외 처리
+                if (job_count == 1)
+                {
+                    foreground_pid = job_list[0].pid;
+                    foreground_cmd = job_list[0].cmdline;
+                    tcsetpgrp(STDIN_FILENO, job_list[0].pid);
+                    kill(-(job_list[0].pid), SIGCONT);
+                    waitpid(job_list[0].pid, &status, 0);
+                    tcsetpgrp(STDIN_FILENO, shell_pgid);
+                    foreground_pid = 0;
+                    foreground_cmd = NULL;
+                }
+                else
+                {
+                    perror("fg");
+                }
             }
 
             // 다음 명령을 시도해야 하기 때문에 continue로 while문을 탈출한다.
@@ -239,16 +263,27 @@ void myshell_execCommand(char **commands)
                 job_num = atoi(&tokens[1][1]);
                 job = get_job_by_index(job_num);
                 // 이렇게 가져온 job이 실제로 있다면, job의 상태를 RUNNING으로 바꾸고 해당 작업을 다시 활성화하기 위해 SIGCONT 시그널을 보낸다.
-                // 그리고 터미널 통제권을 가져온다.
                 if (job != NULL)
                 {
                     job->state = RUNNING;
                     kill(-(job->pid), SIGCONT);
                 }
+                else
+                {
+                    perror("bg");
+                }
             }
-            else
+            else if (tokens[1] == NULL)
             {
-                // 예외 처리
+                if (job_count == 1)
+                {
+                    job_list[0].state = RUNNING;
+                    kill(-(job_list[0].pid), SIGCONT);
+                }
+                else
+                {
+                    perror("bg");
+                }
             }
 
             // 다음 명령을 시도해야 하기 때문에 continue로 while문을 탈출한다.
@@ -348,7 +383,6 @@ void myshell_execCommand(char **commands)
                     foreground_pid = pid;
                     foreground_cmd = commands[i];
                     tcsetpgrp(STDIN_FILENO, pid);
-
                     do
                     {
                         waitpid(pid, &status, 0);
@@ -428,8 +462,7 @@ void list_jobs()
 {
     for (int i = 0; i < job_count; ++i)
     {
-        if (job_list[i].state != RUNNING)
-            printf("[%d] %d\t%s\n", i + 1, job_list[i].pid, job_list[i].cmdline);
+        fprintf(stdout, "[%d] %d\t%s\n", i + 1, job_list[i].pid, job_list[i].cmdline);
     }
 }
 
@@ -440,10 +473,20 @@ job_t *get_job_by_index(int idx)
     return NULL;
 }
 
+// 이거 제대로 처리해야 함.
 void myshell_SIGINT(int signal)
 {
-    write(STDOUT_FILENO, "SIGINT received\n", 17);
-    longjmp(jump, signal);
+    // 1) 만약 포그라운드 자식이 있으면 kill 보내기
+    if (foreground_pid > 0) {
+        kill(-foreground_pid, SIGINT);
+        waitpid(foreground_pid, NULL, WNOHANG);
+    }
+    // 2) 포그라운드 정보 초기화
+    foreground_pid = 0;
+    foreground_cmd = NULL;
+
+    // 3) 메인 루프로 안전하게 복귀
+    siglongjmp(jump, 1);
 }
 
 void myshell_SIGCHLD(int signal)
@@ -460,9 +503,7 @@ void myshell_SIGCHLD(int signal)
             if (job_list[i].pid == pid)
             {
                 found_idx = i;
-                write(STDOUT_FILENO, "\n", 1);
-                fprintf(stdout, "Job [%d] (%d) terminated\n", i + 1, pid);
-                write(STDOUT_FILENO, prompt, strlen(prompt));
+                fprintf(stdout, "\nJob [%d] (%d) terminated\n", i + 1, pid);
                 break;
             }
         }
@@ -477,22 +518,23 @@ void myshell_SIGCHLD(int signal)
             }
             job_count--;
         }
+        sprintf(message, prompt, strlen(prompt));
+        siglongjmp(jump, 3);
     }
 }
 
 void myshell_SIGTSTP(int signal)
 {
-    // 현재 실행 중인 프로세스를 정지시킨다.
-    // kill(foreground_pid, SIGSTOP);
+    if (foreground_pid <= 0)
+        return;   // 실제 포그라운드 작업이 없다면 무시
 
-    // jobs에 현재 실행 중인 프로세스를 추가한다.
+    // 기존 stop 처리…
     add_job(foreground_pid, foreground_cmd, STOPPED);
-
-    fprintf(stdout, "myshell: suspended %s\n", foreground_cmd);
-
-    longjmp(jump, signal);
+    fprintf(stdout, "\n[%d] suspended %s\n", job_count, foreground_cmd);
+    siglongjmp(jump, 3);
 }
 
+// csapp.c의 Signal 함수.
 handler_t *Signal(int signum, handler_t *handler)
 {
     struct sigaction action, old_action;
