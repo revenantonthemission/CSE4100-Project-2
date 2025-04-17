@@ -6,91 +6,60 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#include <string.h>
 #include <unistd.h>
+#include <string.h>
 #include <ctype.h>
-#include <signal.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <termios.h>
 #include <setjmp.h>
+#include <signal.h>
+#include <dirent.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 #include <sys/mman.h>
+#include <errno.h>
+#include <math.h>
+#include <pthread.h>
+#include <semaphore.h>
 
 // Constants & Macros
 #define MAX_LENGTH 32
 #define MAX_LENGTH_2 1024
 #define MAX_LENGTH_3 32768
-#define OFF 0
-#define RUNNING 1
-#define STOPPED 2
+#define MAX_JOBS 128
 
-/* Process structure for each command in the pipeline.  */
-typedef struct process
-{
-    struct process *next; /* next process in pipeline */
-    char **argv;          /* for exec */
-    pid_t pid;            /* process ID */
-    char state;           /* the state of the process, 0 for completion, 1 for running, 2 for stopped */
-    int status;           /* reported status value */
-} process;
-
-/* A job is a pipeline of processes.  */
-typedef struct job
-{
-    struct job *next;          /* next active job */
-    char *command;             /* command line, used for messages */
-    process *first_process;    /* list of processes in this job */
-    pid_t pgid;                /* process group ID */
-    char notified;             /* true if user told about stopped job */
-    struct termios tmodes;     /* saved terminal modes */
-    int stdin, stdout, stderr; /* i/o channels */
-} job;
+typedef struct {
+    pid_t pid;
+    char cmdline[MAX_LENGTH_2];
+    int running;
+    int stopped; // Added to track if the job is stopped
+} job_t;
 
 typedef void handler_t(int);
 
 /* begin global variables */
-job *first_job = NULL; /* The active jobs are linked into a list.  This is its head. */
+char prompt[] = "CSE4100-SP-P3> ";       /* command line prompt */
+int verbose = 0;            /* if true, print extra output */
+char message[MAX_LENGTH_2];         /* for composing sprintf messages */
+volatile sig_atomic_t job_count = 0;
 pid_t shell_pgid;
-struct termios shell_tmodes;
-int shell_terminal;
-int shell_is_interactive;
-char prompt[] = "CSE4100-SP-P3> "; /* command line prompt */
-jmp_buf buffer;
-volatile sig_atomic_t sigchld_received;
-int jmp_call = 0;
+job_t job_list[MAX_JOBS];
+jmp_buf jump;
 
 // Functions
-void myshell_init();
+void add_job(pid_t pid, const char *cmdline);
+void list_jobs();
+job_t *get_job_by_index(int idx);
 void myshell_readInput(char *);
 void myshell_parseInput(char *, char **, const char *);
 void myshell_execCommand(char **);
 void myshell_handleRedirection(char **);
-int myshell_handleBuiltin(char **);
-job *myshell_initJob(job *, char *, process *, pid_t, char, struct termios, int, int, int);
-process *myshell_initProcess(process *, char **, pid_t, char, int);
-void launch_process(process *, pid_t, int, int, int, int);
-int job_is_stopped(job *);
-int job_is_completed(job *);
-void launch_job(job *, int);
-void put_job_in_foreground(job *j, int cont);
-void put_job_in_background(job *j, int cont);
-int mark_process_status(pid_t pid, int status);
-void update_status(void);
-void wait_for_job(job *j);
-void format_job_info(job *j, const char *status);
-void do_job_notification(void);
-void mark_job_as_running(job *j);
-void continue_job(job *j, int foreground);
-job *find_job(pid_t);
-void free_job(job *);
+void myshell_handleBuiltin(char **);
 void myshell_SIGINT(int);
 void myshell_SIGCHLD(int);
-void myshell_SIGTSTP(int);
+void myshell_SIGTSTP(int); // Ensure declaration is present
 void myshell_SIGTERM(int);
-handler_t *Signal(int signum, handler_t *handler);
 
+handler_t *Signal(int signum, handler_t *handler);
 #endif
