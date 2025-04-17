@@ -14,15 +14,16 @@ int main()
 
     do
     {
+        setjmp(buffer);
 
-        if(setjmp(buffer)) {
-            fputs("longjmp has been called\n", stdout);
-        }
-
-        fflush(stdout);
-        
         memset(cmdline, '\0', MAX_LENGTH_3);
         memset(commands, 0, MAX_LENGTH);
+        fflush(stdout);
+        
+        if(sigchld_received) {
+            sigchld_received = 0;
+        }
+        write(STDOUT_FILENO, prompt, strlen(prompt));
 
         // 명령어 입력
         myshell_readInput(cmdline);
@@ -58,8 +59,7 @@ void myshell_init(void)
         {
             kill(-shell_pgid, SIGTTIN);
         }
-        // Get the process group ID of the shell
-        shell_pgid = getpid();
+
         /* Ignore interactive and job-control signals.  */
         signal(SIGINT, SIG_IGN);
         signal(SIGQUIT, SIG_IGN);
@@ -86,11 +86,17 @@ void myshell_init(void)
 /* 명령어 입력을 읽는 함수 */
 void myshell_readInput(char *buf)
 {
-    write(STDOUT_FILENO, prompt, strlen(prompt));
-    if (fgets(buf, MAX_LENGTH_3, stdin) == NULL) {
-        // 입력 EOF나 오류 처리
-        exit(EXIT_SUCCESS);
+    sigset_t mask, prev;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGCHLD);
+    sigprocmask(SIG_BLOCK, &mask, &prev);   /* Block SIGCHLD while reading */
+
+    if (fgets(buf, MAX_LENGTH_3, stdin) == NULL)
+    {
+        sigprocmask(SIG_SETMASK, &prev, NULL);  /* Unblock before exit */
+        _exit(EXIT_SUCCESS);
     }
+    sigprocmask(SIG_SETMASK, &prev, NULL);      /* Unblock after read */
     // 마지막 개행 문자 제거
     size_t len = strlen(buf);
     if (len > 0 && buf[len - 1] == '\n')
@@ -140,7 +146,6 @@ void myshell_execCommand(char **commands)
 {
     // Variables
     int i = 0, status, last_token, background, infile, outfile;
-    int prev[2], curr[2]; // 파이프를 위한 파일 디스크립터
     pid_t pid;
     job *new_job = NULL;
     process *proc_list = NULL;
@@ -210,7 +215,8 @@ void myshell_execCommand(char **commands)
         proc->status = 0;
         proc->next = NULL;
 
-        // process들을 연결된 리스트로 구성
+        // proc = myshell_initProcess(NULL, args, 0, RUNNING, 0);
+        //  process들을 연결된 리스트로 구성
         if (proc_list == NULL)
         {
             proc_list = proc;
@@ -227,30 +233,33 @@ void myshell_execCommand(char **commands)
         {
             strcat(full_cmd, " | ");
         }
-
-        // job 생성: 기존에 정의한 myshell_initJob 함수 사용
-        // 매개변수: next, command(전체 명령어 문자열), 첫번째 process, pgid(초기 0으로 둠),
-        // notified, 터미널 모드, stdin, stdout, stderr
-        new_job = myshell_initJob(
-            NULL,
-            strdup(full_cmd),
-            proc_list,
-            0,            /* pgid: 이후 launch 시에 설정 */
-            0,            /* notified */
-            shell_tmodes, /* saved 터미널 속성 */
-            STDIN_FILENO,
-            STDOUT_FILENO,
-            STDERR_FILENO);
-        new_job->next = first_job;
-        first_job = new_job;
-        // 빌트인 명령어가 아니라면 job 실행
-        // (만약 프로세스 중 첫 번째가 빌트인 명령이라면 별도 처리할 수 있음)
-        if (!myshell_handleBuiltin(proc_list->argv))
-        {
-            launch_job(new_job, !background);
-        }
         i++;
     }
+    /* ---------- 빌트인 먼저 확인 ---------- */
+    if (proc_list && myshell_handleBuiltin(proc_list->argv))
+    {
+        /* 임시로 만든 process 리스트 해제 */
+        process *tmp;
+        for (process *p = proc_list; p; p = tmp)
+        {
+            tmp = p->next;
+            for (int i = 0; p->argv[i]; ++i)
+                free(p->argv[i]);
+            free(p->argv);
+            free(p);
+        }
+        return; /* 잡을 만들지 않고 끝 */
+    }
+
+    /* ---------- 그 다음에 잡 생성 ---------- */
+    new_job = myshell_initJob(
+        NULL, strdup(full_cmd), proc_list,
+        0, 0, shell_tmodes,
+        STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO);
+    new_job->next = first_job;
+    first_job = new_job;
+
+    launch_job(new_job, !background);
 }
 
 // 리다이렉션 처리 함수
@@ -339,8 +348,8 @@ int myshell_handleBuiltin(char **command)
                     fprintf(stdout, "Running ");
                 fprintf(stdout, "%s\n", j->command);
             }
-            return 1;
         }
+        return 1;
     }
     else if (!strcmp(command[0], "fg"))
     {
@@ -555,7 +564,7 @@ void launch_process(process *p, pid_t pgid,
     /* Exec the new process.  Make sure we exit.  */
     execvp(p->argv[0], p->argv);
     perror("execvp");
-    exit(1);
+    _exit(EXIT_FAILURE);
 }
 
 void launch_job(job *j, int foreground)
@@ -566,9 +575,11 @@ void launch_job(job *j, int foreground)
 
     infile = j->stdin;
     // 백그라운드 작업일 경우 stdin을 /dev/null로 설정
-    if (!foreground && (infile == STDIN_FILENO)) {
+    if (!foreground && (infile == STDIN_FILENO))
+    {
         infile = open("/dev/null", O_RDONLY);
-        if (infile < 0) {
+        if (infile < 0)
+        {
             perror("open /dev/null");
             _exit(EXIT_FAILURE);
         }
@@ -592,8 +603,10 @@ void launch_job(job *j, int foreground)
         /* Fork the child processes.  */
         pid = fork();
         if (pid == 0)
+        {
             /* This is the child process.  */
             launch_process(p, j->pgid, infile, outfile, j->stderr, foreground);
+        }
         else if (pid < 0)
         {
             /* The fork failed.  */
@@ -624,13 +637,13 @@ void launch_job(job *j, int foreground)
 
     if (!shell_is_interactive)
         wait_for_job(j);
-    else if (foreground) {
+    else if (foreground)
+    {
         put_job_in_foreground(j, 0);
     }
-    else {
+    else
+    {
         put_job_in_background(j, 0);
-        do_job_notification();
-        fflush(stdout);
     }
 }
 
@@ -668,9 +681,12 @@ the process group a SIGCONT signal to wake it up.  */
 void put_job_in_background(job *j, int cont)
 {
     /* Send the job a continue signal, if necessary.  */
-    if (cont)
+    if (cont) {
         if (kill(-j->pgid, SIGCONT) < 0)
             perror("kill (SIGCONT)");
+        longjmp(buffer, ++jmp_call);
+    }
+        
 }
 
 /* Store the status of the process pid that was returned by waitpid.
@@ -684,8 +700,8 @@ int mark_process_status(pid_t pid, int status)
     if (pid > 0)
     {
         /* Update the record for the process.  */
-        for (j = first_job; j; j = j->next)
-            for (p = j->first_process; p; p = p->next)
+        for (j = first_job; j; j = j->next) {
+            for (p = j->first_process; p; p = p->next){
                 if (p->pid == pid)
                 {
                     p->status = status;
@@ -700,6 +716,8 @@ int mark_process_status(pid_t pid, int status)
                     }
                     return 0;
                 }
+            }
+        }
         fprintf(stderr, "No child process %d.\n", pid);
         return -1;
     }
@@ -829,7 +847,7 @@ int job_is_stopped(job *j)
     process *p;
 
     for (p = j->first_process; p; p = p->next)
-        if (p->state == RUNNING)
+        if (p->state != STOPPED)
             return 0;
     return 1;
 }
@@ -840,11 +858,12 @@ int job_is_completed(job *j)
     process *p;
 
     for (p = j->first_process; p; p = p->next)
-        if (!p->state)
+        if (p->state != OFF)
             return 0;
     return 1;
 }
-void free_job(job *j) {
+void free_job(job *j)
+{
     j->next = NULL;
     free(j->command);
     j->first_process = NULL;
@@ -852,45 +871,58 @@ void free_job(job *j) {
 }
 
 // 현재 포그라운드 작업을 얻는 함수
-job *get_foreground_job(void) {
-    for (job *j = first_job; j; j = j->next) {
-        if (!job_is_completed(j) && !job_is_stopped(j) && (!tcgetpgrp(shell_terminal)) == shell_pgid) {
+job *get_foreground_job(void)
+{
+    for (job *j = first_job; j; j = j->next)
+    {
+        pid_t fg = tcgetpgrp(shell_terminal);
+        if (j->pgid == fg && !job_is_completed(j) && !job_is_stopped(j))
             return j;
-        }
     }
     return NULL;
 }
 
-void myshell_SIGINT(int signal) {
+void myshell_SIGINT(int signal)
+{
     // 포그라운드 작업이 있을 때만 해당 작업에 시그널 전달
     job *j = get_foreground_job();
-    if (j != NULL) {
+    if (j != NULL)
+    {
         kill(-j->pgid, SIGINT);
-    } else {
+    }
+    else
+    {
         // 포그라운드 작업이 없으면 새 프롬프트 출력
         write(STDOUT_FILENO, "\n", 1);
         write(STDOUT_FILENO, prompt, strlen(prompt));
     }
-    longjmp(buffer, 1); // 현재 명령 입력 취소
+    longjmp(buffer, ++jmp_call); // 현재 명령 입력 취소
 }
 
-void myshell_SIGCHLD(int signal) {
-    pid_t pid;
-    int status;
-    
-    while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
+void myshell_SIGCHLD(int sig)
+{
+    int saved_errno = errno;
+    pid_t pid; int status;
+
+    while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0)
         mark_process_status(pid, status);
-    }
-    
-    // 작업 상태 변경 통지
-    do_job_notification();
+        do_job_notification();
+
+    sigchld_received = 1;     /* 메인 루프에게 알려만 줌 */
+    errno = saved_errno;
 }
 
-void myshell_SIGTSTP(int signal) {
-    // 포그라운드 작업에 SIGTSTP 전달
-    // 예: kill(-current_fg_pgid, SIGTSTP);
-    write(STDOUT_FILENO, "\n", 1);
-    // 상태 업데이트 후 새 프롬프트 표시
+void myshell_SIGTSTP(int sig)
+{
+    job *j = get_foreground_job();
+    if (j)
+        kill(-j->pgid, SIGTSTP);
+    else
+    {
+        write(STDOUT_FILENO, "\n", 1);
+        write(STDOUT_FILENO, prompt, strlen(prompt));
+    }
+    longjmp(buffer, ++jmp_call);
 }
 
 handler_t *Signal(int signum, handler_t *handler)

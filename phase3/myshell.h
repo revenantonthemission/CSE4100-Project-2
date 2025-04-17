@@ -60,6 +60,8 @@ int shell_terminal;
 int shell_is_interactive;
 char prompt[] = "CSE4100-SP-P3> "; /* command line prompt */
 jmp_buf buffer;
+volatile sig_atomic_t sigchld_received;
+int jmp_call = 0;
 
 // Functions
 void myshell_init();
