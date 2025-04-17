@@ -15,6 +15,8 @@ int main()
     Signal(SIGINT, myshell_SIGINT);   // ctrl-c를 누를 때 myshell_SIGINT가 호출됨.
     Signal(SIGCHLD, myshell_SIGCHLD); // 자식 프로세스가 종료될 때 myshell_SIGCHLD가 호출됨.
     Signal(SIGTSTP, myshell_SIGTSTP); // ctrl-z를 누를 때 myshell_SIGTSTP가 호출됨.
+    Signal(SIGTTOU, SIG_IGN);
+    Signal(SIGTTIN, SIG_IGN);
 
     do
     {
@@ -191,18 +193,35 @@ void myshell_execCommand(char **commands)
             if (tokens[1] != NULL && tokens[1][0] == '%')
             {
                 // job_num으로 지정한 작업을 가져온다.
-                job_num = atoi(&tokens[1][1]) - 1;
+                job_num = atoi(&tokens[1][1]);
                 job = get_job_by_index(job_num);
                 // 이렇게 가져온 job이 실제로 있다면, job의 상태를 RUNNING으로 바꾸고 해당 작업을 다시 활성화하기 위해 SIGCONT 시그널을 보낸다.
                 // 그리고 터미널 통제권을 가져온다.
                 if (job != NULL)
                 {
-                    job->state = RUNNING;
-                    kill(-(job->pid), SIGCONT);
+                    // 1. foreground 정보 갱신
+                    
+                    foreground_pid = job->pid;
+                    foreground_cmd = job->cmdline;
+
+                    // 2. 터미널 제어권 넘기기
                     tcsetpgrp(STDIN_FILENO, job->pid);
+
+                    // 3. SIGCONT로 깨우기
+                    kill(-(job->pid), SIGCONT);
+
+                    // 4. 종료/중지될 때까지 대기
+                    waitpid(job->pid, &status, 0);
+                    // 5. 다시 쉘이 터미널 제어권 획득
+                    tcsetpgrp(STDIN_FILENO, shell_pgid);
+
+                    // 6. foreground 정보 초기화
+                    foreground_pid = 0;
+                    foreground_cmd = NULL;
                 }
-                
-            } else {
+            }
+            else
+            {
                 // 예외 처리
             }
 
@@ -226,7 +245,9 @@ void myshell_execCommand(char **commands)
                     job->state = RUNNING;
                     kill(-(job->pid), SIGCONT);
                 }
-            } else {
+            }
+            else
+            {
                 // 예외 처리
             }
 
@@ -331,7 +352,7 @@ void myshell_execCommand(char **commands)
                 {
                     foreground_pid = pid;
                     foreground_cmd = commands[i];
-                    tcsetpgrp(STDIN_FILENO, foreground_pid);
+                    tcsetpgrp(STDIN_FILENO, pid);
 
                     do
                     {
@@ -339,8 +360,8 @@ void myshell_execCommand(char **commands)
                     } while (!WIFEXITED(status) && !WIFSIGNALED(status));
 
                     tcsetpgrp(STDIN_FILENO, shell_pgid); // 셸 프로세스 그룹을 foreground로 설정
-                    //foreground_cmd = shell;
-                    //foreground_pid = shell_pgid;
+                    foreground_cmd = NULL;
+                    foreground_pid = 0;
                 }
             }
         }
@@ -395,13 +416,14 @@ void add_job(pid_t pid, const char *cmdline, char state)
         job_list[job_count].pid = pid;
         strncpy(job_list[job_count].cmdline, cmdline, MAX_LENGTH_2);
         job_list[job_count].state = state;
-        switch(state) {
-            case RUNNING:
-                kill(pid, SIGCONT);
-                break;
-            case STOPPED:
-                kill(pid, SIGSTOP);
-                break;
+        switch (state)
+        {
+        case RUNNING:
+            kill(pid, SIGCONT);
+            break;
+        case STOPPED:
+            kill(pid, SIGSTOP);
+            break;
         }
         job_count++;
     }
@@ -444,7 +466,7 @@ void myshell_SIGCHLD(int signal)
             {
                 found_idx = i;
                 write(STDOUT_FILENO, "\n", 1);
-                printf("Job [%d] (%d) terminated\n", i + 1, pid);
+                fprintf(stdout, "Job [%d] (%d) terminated\n", i + 1, pid);
                 write(STDOUT_FILENO, prompt, strlen(prompt));
                 break;
             }
@@ -466,7 +488,7 @@ void myshell_SIGCHLD(int signal)
 void myshell_SIGTSTP(int signal)
 {
     // 현재 실행 중인 프로세스를 정지시킨다.
-    //kill(foreground_pid, SIGSTOP);
+    // kill(foreground_pid, SIGSTOP);
 
     // jobs에 현재 실행 중인 프로세스를 추가한다.
     add_job(foreground_pid, foreground_cmd, STOPPED);
