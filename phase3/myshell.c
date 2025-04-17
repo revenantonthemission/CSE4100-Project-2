@@ -374,7 +374,7 @@ void myshell_execCommand(char **commands)
                 {
                     // 백그라운드 프로세스인 경우, PID 출력
                     add_job(pid, commands[i], RUNNING); // Add job to job list
-                    sprintf(pid_str, "[%d] %d", job_count, pid);
+                    sprintf(pid_str, "[%d] %d ", job_count, pid);
                     write(STDOUT_FILENO, pid_str, strlen(pid_str));
                     write(STDOUT_FILENO, "\n", 1);
                 }

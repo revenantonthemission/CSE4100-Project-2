@@ -45,8 +45,9 @@ char prompt[] = "CSE4100-SP-P2> ";       /* command line prompt */
 char message[MAX_LENGTH_2];         /* for composing sprintf messages */
 char *foreground_cmd = NULL;
 volatile sig_atomic_t job_count = 0;
+volatile sig_atomic_t child_terminated = 0;
 volatile pid_t foreground_pid = 0;
-pid_t shell_pgid;
+volatile pid_t shell_pgid;
 job_t job_list[MAX_JOBS];
 sigjmp_buf jump;
 
