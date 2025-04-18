@@ -9,15 +9,13 @@ int main()
     // 쉘의 pid를 쉘의 프로세스 그룹 ID로 설정함.
     shell_pgid = getpid();
     setpgid(shell_pgid, shell_pgid);
-    // 셸 프로세스 그룹을 foreground로 설정
-    tcsetpgrp(STDIN_FILENO, shell_pgid);
 
     Signal(SIGINT, myshell_SIGINT);   // ctrl-c를 누를 때 myshell_SIGINT가 호출됨.
     Signal(SIGCHLD, myshell_SIGCHLD); // 자식 프로세스가 종료될 때 myshell_SIGCHLD가 호출됨.
     Signal(SIGTSTP, myshell_SIGTSTP); // ctrl-z를 누를 때 myshell_SIGTSTP가 호출됨.
     Signal(SIGCONT, myshell_SIGCONT);
-    signal(SIGTTOU, SIG_IGN);         // 터미널의 제어권을 가지지 못한 프로세스에서 출력하지 못하게 함.
-    signal(SIGTTIN, SIG_IGN);         // 터미널의 제어권을 가지지 못한 프로세스가 입력을 받지 못하게 함.
+    signal(SIGTTOU, SIG_IGN); // 터미널의 제어권을 가지지 못한 프로세스에서 출력하지 못하게 함.
+    signal(SIGTTIN, SIG_IGN); // 터미널의 제어권을 가지지 못한 프로세스가 입력을 받지 못하게 함.
 
     init_job();
 
@@ -27,13 +25,16 @@ int main()
         sigsetjmp(jump, SIGINT);
         sigsetjmp(jump, SIGTSTP);
 
+        // 셸 프로세스 그룹을 foreground로 설정
+        tcsetpgrp(STDIN_FILENO, shell_pgid);
+
         // 초기화
         memset(cmdline, '\0', MAX_LENGTH_3);
         memset(commands, 0, MAX_LENGTH);
 
         // 프롬프트 출력
         if (child_terminated)
-        {   
+        {
             child_terminated = 0;
         }
         write(STDOUT_FILENO, prompt, sizeof(prompt) - 1);
@@ -477,13 +478,14 @@ void list_jobs()
     {
         current_job = (i) ? '-' : '+';
         fprintf(stdout, "[%d] \t%c ", i + 1, current_job);
-        switch(job_list[i].state) {
-            case RUNNING:
-                fprintf(stdout, "running %-5s\n", job_list[i].cmdline);
-                break;
-            case STOPPED:
-                fprintf(stdout, "suspended %-5s\n", job_list[i].cmdline);
-                break;
+        switch (job_list[i].state)
+        {
+        case RUNNING:
+            fprintf(stdout, "running %-5s\n", job_list[i].cmdline);
+            break;
+        case STOPPED:
+            fprintf(stdout, "suspended %-5s\n", job_list[i].cmdline);
+            break;
         }
     }
 }
@@ -591,7 +593,8 @@ void myshell_SIGTSTP(int signal)
     siglongjmp(jump, SIGTSTP);
 }
 
-void myshell_SIGCONT(int signal) {
+void myshell_SIGCONT(int signal)
+{
     current_job = '+';
     snprintf(message, MAX_LENGTH_2, "\n[%d]   %c continued %-s\n", job_count, current_job, foreground_cmd);
     write(STDOUT_FILENO, message, MAX_LENGTH_2);
