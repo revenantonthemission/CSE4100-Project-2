@@ -15,25 +15,28 @@ int main()
     Signal(SIGINT, myshell_SIGINT);   // ctrl-c를 누를 때 myshell_SIGINT가 호출됨.
     Signal(SIGCHLD, myshell_SIGCHLD); // 자식 프로세스가 종료될 때 myshell_SIGCHLD가 호출됨.
     Signal(SIGTSTP, myshell_SIGTSTP); // ctrl-z를 누를 때 myshell_SIGTSTP가 호출됨.
-    signal(SIGTTOU, SIG_IGN); // 터미널의 제어권을 가지지 못한 프로세스에서 출력하지 못하게 함.
-    signal(SIGTTIN, SIG_IGN); // 터미널의 제어권을 가지지 못한 프로세스가 입력을 받지 못하게 함.
+    Signal(SIGCONT, myshell_SIGCONT);
+    signal(SIGTTOU, SIG_IGN);         // 터미널의 제어권을 가지지 못한 프로세스에서 출력하지 못하게 함.
+    signal(SIGTTIN, SIG_IGN);         // 터미널의 제어권을 가지지 못한 프로세스가 입력을 받지 못하게 함.
+
+    init_job();
 
     do
     {
         // siglongjmp() 함수를 호출하면 메인 루프의 처음으로 다시 돌아온다.
-        sigsetjmp(jump, 1);
-        sigsetjmp(jump, 3);
-
-        // 버퍼 비우기
-        fflush(stdout);
+        sigsetjmp(jump, SIGINT);
+        sigsetjmp(jump, SIGTSTP);
 
         // 초기화
         memset(cmdline, '\0', MAX_LENGTH_3);
         memset(commands, 0, MAX_LENGTH);
 
         // 프롬프트 출력
-        sprintf(message, prompt, strlen(prompt));
-        write(STDOUT_FILENO, message, strlen(message));
+        if (child_terminated)
+        {   
+            child_terminated = 0;
+        }
+        write(STDOUT_FILENO, prompt, sizeof(prompt) - 1);
 
         // 만약 백그라운드 프로세스의 종료로 인해 프롬프트가 입력받는 위치에 없다면, 입력을 기다리지 않고 새로운 프롬프트를 출력함
         myshell_readInput(cmdline);
@@ -51,8 +54,25 @@ int main()
 /* 명령어 입력을 읽는 함수 */
 void myshell_readInput(char *buf)
 {
-    // 커맨드 입력
-    fgets(buf, MAX_LENGTH_3, stdin);
+    ssize_t n;
+    size_t pos = 0;
+    char c;
+
+    // 1바이트씩 읽어서 '\n' 만나면 종료
+    while ((n = read(STDIN_FILENO, &c, 1)) > 0)
+    {
+        if (c == '\n')
+            break;
+        if (pos < MAX_LENGTH_3 - 1)
+        {
+            buf[pos++] = c;
+        }
+    }
+    if (n < 0)
+    {
+        perror("read");
+    }
+    buf[pos] = '\0';
 }
 
 void myshell_parseInput(char *buf, char **args, const char *delim)
@@ -102,7 +122,7 @@ void myshell_execCommand(char **commands)
     int curr_pipe[2];
     pid_t pid;
     job_t *job;
-    char *tokens[MAX_LENGTH], pid_str[10];
+    char *tokens[MAX_LENGTH], pid_str[10], job_cmd[MAX_LENGTH_2];
 
     // 명령어가 없으면 종료
     if (commands[0] == NULL)
@@ -116,6 +136,8 @@ void myshell_execCommand(char **commands)
 
         // 현재 명령어를 토큰으로 분리
         memset(tokens, 0, sizeof(tokens));
+        memset(job_cmd, '\0', MAX_LENGTH_2);
+        strcpy(job_cmd, commands[i]);
         myshell_parseInput(commands[i], tokens, " ");
 
         last_token = 0;
@@ -216,7 +238,7 @@ void myshell_execCommand(char **commands)
                     waitpid(job->pid, &status, WNOHANG | WUNTRACED);
                     if (WIFSTOPPED(status))
                     {
-                        job->state = STOPPED;  //job_list에 남겨 두기
+                        job->state = STOPPED; // job_list에 남겨 두기
                     }
                     // 5. 다시 쉘이 터미널 제어권 획득
                     tcsetpgrp(STDIN_FILENO, shell_pgid);
@@ -301,6 +323,7 @@ void myshell_execCommand(char **commands)
                 {
                     // 지정된 시그널을 보냄.
                     kill(-(job->pid), SIGTERM);
+                    delete_job(job->pid);
                 }
             }
             i++;
@@ -373,8 +396,8 @@ void myshell_execCommand(char **commands)
                 if (background)
                 {
                     // 백그라운드 프로세스인 경우, PID 출력
-                    add_job(pid, commands[i], RUNNING); // Add job to job list
-                    sprintf(pid_str, "[%d] %d ", job_count, pid);
+                    add_job(pid, job_cmd, RUNNING); // Add job to job list
+                    snprintf(pid_str, 10, "[%d] %d ", job_count, pid);
                     write(STDOUT_FILENO, pid_str, strlen(pid_str));
                     write(STDOUT_FILENO, "\n", 1);
                 }
@@ -438,12 +461,41 @@ void myshell_handleRedirection(char **tokens)
     }
 }
 
+void init_job()
+{
+    for (int i = 0; i < MAX_JOBS; i++)
+    {
+        memset(job_list[i].cmdline, '\0', MAX_LENGTH_2);
+        job_list[i].pid = -1;
+        job_list[i].state = -1;
+    }
+}
+
+void list_jobs()
+{
+    for (int i = 0; i < job_count; ++i)
+    {
+        current_job = (i) ? '-' : '+';
+        fprintf(stdout, "[%d] \t%c ", i + 1, current_job);
+        switch(job_list[i].state) {
+            case RUNNING:
+                fprintf(stdout, "running %-5s\n", job_list[i].cmdline);
+                break;
+            case STOPPED:
+                fprintf(stdout, "suspended %-5s\n", job_list[i].cmdline);
+                break;
+        }
+    }
+}
+
 void add_job(pid_t pid, const char *cmdline, char state)
 {
     if (job_count < MAX_JOBS)
     {
         job_list[job_count].pid = pid;
-        strncpy(job_list[job_count].cmdline, cmdline, MAX_LENGTH_2);
+        // strncpy(job_list[job_count].cmdline, cmdline, MAX_LENGTH_2);
+        // 저레벨 IO를 사용함.
+        snprintf(job_list[job_count].cmdline, MAX_LENGTH_2, "%s", cmdline);
         job_list[job_count].state = state;
         switch (state)
         {
@@ -458,11 +510,32 @@ void add_job(pid_t pid, const char *cmdline, char state)
     }
 }
 
-void list_jobs()
+void delete_job(pid_t pid)
 {
+    int found_idx = -1;
+    // 종료된 프로세스의 PID를 찾음
     for (int i = 0; i < job_count; ++i)
     {
-        fprintf(stdout, "[%d] %d\t%s\n", i + 1, job_list[i].pid, job_list[i].cmdline);
+        if (job_list[i].pid == pid)
+        {
+            found_idx = i;
+            current_job = (i) ? '-' : '+';
+            snprintf(message, MAX_LENGTH_2, "\n[%d]   %c done\t%5s\n", i + 1, current_job, job_list[i].cmdline);
+            write(STDOUT_FILENO, message, MAX_LENGTH_2);
+            write(STDOUT_FILENO, prompt, sizeof(prompt) - 1);
+            break;
+        }
+    }
+
+    // 종료된 작업을 찾았을 때만 배열 시프트
+    if (found_idx >= 0)
+    {
+        // 발견된 인덱스부터 배열 시프트
+        for (int j = found_idx; j < job_count - 1; j++)
+        {
+            job_list[j] = job_list[j + 1];
+        }
+        job_count--;
     }
 }
 
@@ -476,17 +549,20 @@ job_t *get_job_by_index(int idx)
 // 이거 제대로 처리해야 함.
 void myshell_SIGINT(int signal)
 {
+    int status;
     // 1) 만약 포그라운드 자식이 있으면 kill 보내기
-    if (foreground_pid > 0) {
-        kill(-foreground_pid, SIGINT);
-        waitpid(foreground_pid, NULL, WNOHANG);
+    if (foreground_pid > 0)
+    {
+        kill(-foreground_pid, SIGTERM);
+        waitpid(foreground_pid, &status, WNOHANG);
     }
     // 2) 포그라운드 정보 초기화
     foreground_pid = 0;
     foreground_cmd = NULL;
 
     // 3) 메인 루프로 안전하게 복귀
-    siglongjmp(jump, 1);
+    write(STDOUT_FILENO, "\n", 1);
+    siglongjmp(jump, SIGINT);
 }
 
 void myshell_SIGCHLD(int signal)
@@ -496,42 +572,29 @@ void myshell_SIGCHLD(int signal)
     // 백그라운드 프로세스 종료 시그널 처리
     while ((pid = waitpid(-1, &status, WNOHANG)) > 0)
     {
-        int found_idx = -1;
-        // 종료된 프로세스의 PID를 찾음
-        for (int i = 0; i < job_count; ++i)
-        {
-            if (job_list[i].pid == pid)
-            {
-                found_idx = i;
-                fprintf(stdout, "\nJob [%d] (%d) terminated\n", i + 1, pid);
-                break;
-            }
-        }
-
-        // 종료된 작업을 찾았을 때만 배열 시프트
-        if (found_idx >= 0)
-        {
-            // 발견된 인덱스부터 배열 시프트
-            for (int j = found_idx; j < job_count - 1; j++)
-            {
-                job_list[j] = job_list[j + 1];
-            }
-            job_count--;
-        }
-        sprintf(message, prompt, strlen(prompt));
-        siglongjmp(jump, 3);
+        delete_job(pid);
+        child_terminated = 1;
     }
 }
 
 void myshell_SIGTSTP(int signal)
 {
+    char current_job = '+';
+
     if (foreground_pid <= 0)
-        return;   // 실제 포그라운드 작업이 없다면 무시
+        return; // 실제 포그라운드 작업이 없다면 무시
 
     // 기존 stop 처리…
     add_job(foreground_pid, foreground_cmd, STOPPED);
-    fprintf(stdout, "\n[%d] suspended %s\n", job_count, foreground_cmd);
-    siglongjmp(jump, 3);
+    snprintf(message, MAX_LENGTH_2, "\n[%d]   %c suspended %-s\n", job_count, current_job, foreground_cmd);
+    write(STDOUT_FILENO, message, MAX_LENGTH_2);
+    siglongjmp(jump, SIGTSTP);
+}
+
+void myshell_SIGCONT(int signal) {
+    current_job = '+';
+    snprintf(message, MAX_LENGTH_2, "\n[%d]   %c continued %-s\n", job_count, current_job, foreground_cmd);
+    write(STDOUT_FILENO, message, MAX_LENGTH_2);
 }
 
 // csapp.c의 Signal 함수.

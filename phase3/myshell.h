@@ -42,19 +42,22 @@ typedef void handler_t(int);
 
 /* begin global variables */
 char prompt[] = "CSE4100-SP-P2> ";       /* command line prompt */
-char message[MAX_LENGTH_2];         /* for composing sprintf messages */
+char message[MAX_LENGTH_2];         /* for composing snprintf messages */
+char current_job;
 char *foreground_cmd = NULL;
 volatile sig_atomic_t job_count = 0;
-volatile sig_atomic_t child_terminated = 0;
+volatile sig_atomic_t child_terminated = 1;
 volatile pid_t foreground_pid = 0;
 volatile pid_t shell_pgid;
 job_t job_list[MAX_JOBS];
 sigjmp_buf jump;
 
 // Functions
-void add_job(pid_t pid, const char *cmdline, char state);
+void init_job();
 void list_jobs();
-job_t *get_job_by_index(int idx);
+void add_job(pid_t, const char *, char);
+void delete_job(pid_t);
+job_t *get_job_by_index(int);
 void myshell_readInput(char *);
 void myshell_parseInput(char *, char **, const char *);
 void myshell_execCommand(char **);
@@ -63,6 +66,7 @@ void myshell_handleBuiltin(char **);
 void myshell_SIGINT(int);
 void myshell_SIGCHLD(int);
 void myshell_SIGTSTP(int);
+void myshell_SIGCONT(int);
 
-handler_t *Signal(int signum, handler_t *handler);
+handler_t *Signal(int, handler_t *);
 #endif
