@@ -122,7 +122,7 @@ void myshell_execCommand(char **commands)
     int curr_pipe[2];
     pid_t pid;
     job_t *job;
-    char *tokens[MAX_LENGTH], pid_str[10], job_cmd[MAX_LENGTH_2];
+    char *tokens[MAX_LENGTH], pid_str[30], job_cmd[MAX_LENGTH_2];
 
     // 명령어가 없으면 종료
     if (commands[0] == NULL)
@@ -397,7 +397,7 @@ void myshell_execCommand(char **commands)
                 {
                     // 백그라운드 프로세스인 경우, PID 출력
                     add_job(pid, job_cmd, RUNNING); // Add job to job list
-                    snprintf(pid_str, 10, "[%d] %d ", job_count, pid);
+                    snprintf(pid_str, 30, "[%d] %d ", job_count, pid);
                     write(STDOUT_FILENO, pid_str, strlen(pid_str));
                     write(STDOUT_FILENO, "\n", 1);
                 }
