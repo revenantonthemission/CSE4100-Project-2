@@ -353,6 +353,10 @@ void myshell_execCommand(char **commands)
         {
             // 자식 프로세스의 그룹 ID 설정
             setpgid(0, 0);
+            tcsetpgrp(STDIN_FILENO, getpid());
+
+            signal(SIGINT, SIG_DFL);  // 자식 프로세스는 Ctrl+C 허용
+            signal(SIGTSTP, SIG_DFL); // 자식 프로세스는 Ctrl+Z 허용
 
             // 이전 파이프에서 입력 리다이렉션
             if (prev_pipe[0] != -1)
@@ -379,6 +383,12 @@ void myshell_execCommand(char **commands)
         // 부모 프로세스는 이 부분을 실행한다.
         else
         {
+
+            setpgid(pid, pid); // 자식 프로세스의 프로세스 그룹 설정
+            tcsetpgrp(STDIN_FILENO, pid);
+
+            signal(SIGINT, SIG_IGN); // 다시 쉘 상태로 복귀
+            signal(SIGTSTP, SIG_IGN);
             // 이전 파이프 닫기
             if (prev_pipe[0] != -1)
             {
@@ -406,7 +416,6 @@ void myshell_execCommand(char **commands)
                 {
                     foreground_pid = pid;
                     foreground_cmd = commands[i];
-                    tcsetpgrp(STDIN_FILENO, pid);
                     do
                     {
                         waitpid(pid, &status, 0);
